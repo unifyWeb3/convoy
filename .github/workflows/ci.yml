@@ -1,0 +1,143 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Mechanical invariant guards.
+  #
+  # These make the reliability claims real rather than aspirational: they fail
+  # the build the moment a session drifts. Each grep must produce NO output.
+  # They are scoped to code directories (apps, packages, services, scripts) so
+  # that documentation, .env.example and CLAUDE.md — which legitimately name
+  # app.keeperhub.com and PRIVATE_KEY — do not cause false failures.
+  # The same commands are mirrored in .convoy/checklists/review.md.
+  # ---------------------------------------------------------------------------
+  invariants:
+    name: Invariant grep-guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No KeeperHub access outside packages/kh-client
+        run: |
+          set -o pipefail
+          hits=$(grep -rn "app\.keeperhub\.com" apps packages services scripts \
+                   --include='*.ts' --include='*.tsx' --include='*.js' --include='*.mjs' \
+                   2>/dev/null | grep -v '^packages/kh-client/' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::KeeperHub must only be reached from packages/kh-client."
+            echo "$hits"
+            exit 1
+          fi
+          echo "OK — no KeeperHub access outside packages/kh-client."
+
+      - name: Convoy never sets a nonce
+        run: |
+          set -o pipefail
+          hits=$(grep -rnE "\bnonce[[:space:]]*:" \
+                   packages/kh-client/src services/worker/src apps/web/lib \
+                   --include='*.ts' --include='*.tsx' 2>/dev/null || true)
+          if [ -n "$hits" ]; then
+            echo "::error::Convoy never sets a nonce — ordering is delegated to KeeperHub."
+            echo "$hits"
+            exit 1
+          fi
+          echo "OK — no nonce set in client or worker payloads."
+
+      - name: Convoy never holds a private key
+        run: |
+          set -o pipefail
+          hits=$(grep -rln "PRIVATE_KEY" apps packages services scripts 2>/dev/null \
+                   | grep -v '^packages/contracts/script/' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::PRIVATE_KEY may only be referenced under packages/contracts/script."
+            echo "$hits"
+            exit 1
+          fi
+          echo "OK — no private key referenced outside packages/contracts/script."
+
+      - name: No staged failures in non-test code
+        run: |
+          set -o pipefail
+          hits=$(grep -rnE "mockRevert|fakeTxHash|stageFailure|injectGasSpike|throw new Error\(\"fake" \
+                   apps packages services scripts \
+                   --include='*.ts' --include='*.tsx' 2>/dev/null \
+                   | grep -vE "(/test/|/tests/|/e2e/|/fixtures/|\.test\.|\.spec\.|__tests__)" || true)
+          if [ -n "$hits" ]; then
+            echo "::error::Convoy never stages a failure, injects a gas spike, or fakes a hash."
+            echo "$hits"
+            exit 1
+          fi
+          echo "OK — no staged-failure patterns in non-test code."
+
+  build:
+    name: Lint, typecheck, build, test
+    runs-on: ubuntu-latest
+    needs: invariants
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm -r build
+
+      - name: Test
+        run: pnpm -r test
+
+  contracts:
+    name: Contracts
+    uses: ./.github/workflows/contracts.yml
+
+  ablation:
+    name: Ablation harness
+    runs-on: ubuntu-latest
+    needs: build
+    # The harness executes real transactions, so it runs only where the required
+    # secrets exist. It is wired up at CVY-016 and is a no-op before then.
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Ablation (CVY-016)
+        run: |
+          if [ ! -s scripts/ablation.ts ] || ! grep -q "ablate-planner" scripts/ablation.ts; then
+            echo "Ablation harness not implemented yet (CVY-016). Skipping."
+            exit 0
+          fi
+          echo "Ablation harness present — run manually with real credentials:"
+          echo "  pnpm tsx scripts/ablation.ts --ablate-planner"
+          echo "  pnpm tsx scripts/ablation.ts --ablate-critic"

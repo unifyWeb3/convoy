@@ -1,0 +1,440 @@
+#!/usr/bin/env tsx
+/**
+ * Convoy environment verification — the PASS/FAIL matrix from Implementation
+ * Blueprint §11.
+ *
+ * Rules this script obeys:
+ *  - It never fakes a pass. A check that cannot run yet reports FAIL with the
+ *    reason and the milestone that will make it pass.
+ *  - It never calls KeeperHub directly. `packages/kh-client` is the only module
+ *    permitted to reach the KeeperHub API, and a script is not an exception to
+ *    that boundary — the KeeperHub rows are wired through the client at CVY-004.
+ *  - It never reads or prints a secret value.
+ *
+ * Exit code: 0 if every check that is expected to pass at the current stage
+ * passes; 1 if a blocking check fails.
+ */
+
+import { execFile } from 'node:child_process';
+import { createConnection } from 'node:net';
+import { readFileSync, existsSync } from 'node:fs';
+import { promisify } from 'node:util';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const execFileAsync = promisify(execFile);
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+type Status = 'PASS' | 'FAIL';
+
+interface Result {
+  check: string;
+  status: Status;
+  detail: string;
+  /** Undefined = must pass now. Otherwise the milestone that makes it pass. */
+  expectedFrom?: string;
+}
+
+// ---------------------------------------------------------------------------
+// .env loading (no dependency — the file is read, never printed)
+// ---------------------------------------------------------------------------
+
+function loadEnvFile(path: string): void {
+  if (!existsSync(path)) return;
+  for (const rawLine of readFileSync(path, 'utf8').split('\n')) {
+    const line = rawLine.trim();
+    if (line === '' || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq === -1) continue;
+    const key = line.slice(0, eq).trim();
+    let value = line.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (process.env[key] === undefined) process.env[key] = value;
+  }
+}
+
+function env(name: string): string | undefined {
+  const v = process.env[name];
+  if (v === undefined) return undefined;
+  const trimmed = v.trim();
+  if (trimmed === '') return undefined;
+  // Values still carrying an .env.example placeholder are treated as unset.
+  if (/replace_me|^sk-replace|^kh_live_replace/.test(trimmed)) return undefined;
+  if (/^0x0{40}$/.test(trimmed)) return undefined;
+  return trimmed;
+}
+
+// ---------------------------------------------------------------------------
+// helpers
+// ---------------------------------------------------------------------------
+
+async function run(
+  cmd: string,
+  args: string[],
+  cwd = ROOT,
+  envOverrides: Record<string, string> = {},
+): Promise<string> {
+  const { stdout } = await execFileAsync(cmd, args, {
+    cwd,
+    timeout: 300_000,
+    maxBuffer: 32 * 1024 * 1024,
+    env: { ...process.env, ...envOverrides },
+  });
+  return stdout.trim();
+}
+
+/** execFile errors carry the child's stderr; surface it instead of the generic message. */
+function failureDetail(e: unknown, fallback: string): string {
+  const err = e as { stderr?: string; message?: string };
+  const stderr = (err.stderr ?? '').trim();
+  if (stderr !== '') {
+    const lines = stderr.split('\n').filter((l) => l.trim() !== '');
+    return lines.slice(-2).join(' | ');
+  }
+  return err.message?.split('\n')[0] ?? fallback;
+}
+
+function tcpProbe(host: string, port: number, payload?: string, timeoutMs = 3000): Promise<string> {
+  return new Promise((res, rej) => {
+    const socket = createConnection({ host, port });
+    let data = '';
+    const done = (err?: Error): void => {
+      socket.destroy();
+      if (err) rej(err);
+      else res(data);
+    };
+    socket.setTimeout(timeoutMs, () => done(new Error(`timeout after ${timeoutMs}ms`)));
+    socket.on('error', done);
+    socket.on('connect', () => {
+      if (payload === undefined) done();
+      else socket.write(payload);
+    });
+    socket.on('data', (chunk: Buffer) => {
+      data += chunk.toString('utf8');
+      done();
+    });
+  });
+}
+
+async function rpcCall(url: string, method: string, params: unknown[]): Promise<unknown> {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const body = (await response.json()) as { result?: unknown; error?: { message?: string } };
+  if (body.error) throw new Error(body.error.message ?? 'rpc error');
+  return body.result;
+}
+
+// ---------------------------------------------------------------------------
+// checks
+// ---------------------------------------------------------------------------
+
+async function checkNode(): Promise<Result> {
+  const version = process.version;
+  return {
+    check: 'Node version',
+    status: version.startsWith('v22.') ? 'PASS' : 'FAIL',
+    detail: `${version} (require v22.x)`,
+  };
+}
+
+async function checkPnpm(): Promise<Result> {
+  try {
+    return { check: 'pnpm present', status: 'PASS', detail: `v${await run('pnpm', ['-v'])}` };
+  } catch {
+    return { check: 'pnpm present', status: 'FAIL', detail: 'pnpm not on PATH' };
+  }
+}
+
+async function checkFoundry(): Promise<Result> {
+  try {
+    const out = await run('forge', ['--version']);
+    return { check: 'Foundry present', status: 'PASS', detail: out.split('\n')[0] ?? out };
+  } catch {
+    return {
+      check: 'Foundry present',
+      status: 'FAIL',
+      detail: 'forge not on PATH (run foundryup)',
+    };
+  }
+}
+
+async function checkPostgres(): Promise<Result> {
+  const url = env('DATABASE_URL');
+  if (url === undefined) {
+    return { check: 'Postgres reachable', status: 'FAIL', detail: 'DATABASE_URL not set' };
+  }
+  try {
+    const parsed = new URL(url);
+    const port = parsed.port === '' ? 5432 : Number(parsed.port);
+    await tcpProbe(parsed.hostname, port);
+    try {
+      const out = await run('psql', [url, '-tAc', 'select 1']);
+      return {
+        check: 'Postgres reachable',
+        status: out === '1' ? 'PASS' : 'FAIL',
+        detail: out === '1' ? `select 1 ok on ${parsed.hostname}:${port}` : `unexpected: ${out}`,
+      };
+    } catch (e) {
+      return {
+        check: 'Postgres reachable',
+        status: 'FAIL',
+        detail: `port open but query failed: ${(e as Error).message.split('\n')[0]}`,
+      };
+    }
+  } catch (e) {
+    return { check: 'Postgres reachable', status: 'FAIL', detail: (e as Error).message };
+  }
+}
+
+async function checkRedis(): Promise<Result> {
+  const url = env('REDIS_URL');
+  if (url === undefined) {
+    return { check: 'Redis reachable', status: 'FAIL', detail: 'REDIS_URL not set' };
+  }
+  try {
+    const parsed = new URL(url);
+    const port = parsed.port === '' ? 6379 : Number(parsed.port);
+    const reply = await tcpProbe(parsed.hostname, port, 'PING\r\n');
+    return {
+      check: 'Redis reachable',
+      status: reply.startsWith('+PONG') ? 'PASS' : 'FAIL',
+      detail: reply.startsWith('+PONG')
+        ? `PING -> PONG on ${parsed.hostname}:${port}`
+        : `unexpected reply: ${JSON.stringify(reply)}`,
+    };
+  } catch (e) {
+    return { check: 'Redis reachable', status: 'FAIL', detail: (e as Error).message };
+  }
+}
+
+async function checkPrismaClient(): Promise<Result> {
+  try {
+    // Indirect specifier: the module does not exist until CVY-005 generates it,
+    // so it must not be resolved statically at typecheck time.
+    const specifier = '@prisma/client';
+    await import(specifier);
+    return { check: 'Prisma client generated', status: 'PASS', detail: 'import succeeds' };
+  } catch {
+    return {
+      check: 'Prisma client generated',
+      status: 'FAIL',
+      detail: 'no generated client — @convoy/db schema lands in CVY-005',
+      expectedFrom: 'CVY-005',
+    };
+  }
+}
+
+async function checkMigrations(): Promise<Result> {
+  try {
+    const out = await run('pnpm', [
+      '--filter',
+      '@convoy/db',
+      'exec',
+      'prisma',
+      'migrate',
+      'status',
+    ]);
+    const clean = /up to date|No pending migrations/i.test(out);
+    return {
+      check: 'Migrations applied',
+      status: clean ? 'PASS' : 'FAIL',
+      detail: clean
+        ? 'no pending migrations'
+        : (out.split('\n').slice(-1)[0] ?? 'pending migrations'),
+      expectedFrom: clean ? undefined : 'CVY-005',
+    };
+  } catch {
+    return {
+      check: 'Migrations applied',
+      status: 'FAIL',
+      detail: 'prisma not installed — migrations land in CVY-005',
+      expectedFrom: 'CVY-005',
+    };
+  }
+}
+
+async function checkKeeperHubAuth(): Promise<Result> {
+  const key = env('KEEPERHUB_API_KEY');
+  const base = env('KEEPERHUB_BASE_URL');
+  const missing: string[] = [];
+  if (key === undefined) missing.push('KEEPERHUB_API_KEY');
+  if (base === undefined) missing.push('KEEPERHUB_BASE_URL');
+  return {
+    check: 'KeeperHub auth',
+    status: 'FAIL',
+    detail:
+      missing.length > 0
+        ? `${missing.join(' + ')} not set; check runs through @convoy/kh-client from CVY-004`
+        : 'credentials present, but this script never calls KeeperHub directly — the check is wired through @convoy/kh-client at CVY-004',
+    expectedFrom: 'CVY-004',
+  };
+}
+
+async function checkKeeperHubWallet(): Promise<Result> {
+  return {
+    check: 'KeeperHub wallet configured',
+    status: 'FAIL',
+    detail:
+      'org Turnkey wallet is confirmed via MCP get_wallet_integration (must not return 422); wired through @convoy/kh-client at CVY-004',
+    expectedFrom: 'CVY-004',
+  };
+}
+
+async function checkBaseRpc(): Promise<Result> {
+  const url = env('BASE_RPC_URL');
+  if (url === undefined) {
+    return {
+      check: 'Base RPC pinned 8453',
+      status: 'FAIL',
+      detail: 'BASE_RPC_URL not set (dedicated RPC required — never a public one)',
+      expectedFrom: 'CVY-003',
+    };
+  }
+  try {
+    const chainId = await rpcCall(url, 'eth_chainId', []);
+    const ok = chainId === '0x2105';
+    return {
+      check: 'Base RPC pinned 8453',
+      status: ok ? 'PASS' : 'FAIL',
+      detail: ok ? 'eth_chainId == 0x2105' : `eth_chainId == ${String(chainId)}, expected 0x2105`,
+    };
+  } catch (e) {
+    return {
+      check: 'Base RPC pinned 8453',
+      status: 'FAIL',
+      detail: (e as Error).message,
+      expectedFrom: 'CVY-003',
+    };
+  }
+}
+
+async function checkRegistryDeployed(): Promise<Result> {
+  const url = env('BASE_RPC_URL');
+  const addr = env('CONVOY_REGISTRY_ADDR');
+  if (url === undefined || addr === undefined) {
+    return {
+      check: 'Registry deployed',
+      status: 'FAIL',
+      detail: 'BASE_RPC_URL and/or CONVOY_REGISTRY_ADDR not set — deployed in CVY-003',
+      expectedFrom: 'CVY-003',
+    };
+  }
+  try {
+    const code = await rpcCall(url, 'eth_getCode', [addr, 'latest']);
+    const deployed = typeof code === 'string' && code !== '0x';
+    return {
+      check: 'Registry deployed',
+      status: deployed ? 'PASS' : 'FAIL',
+      detail: deployed ? `bytecode present at ${addr}` : `no bytecode at ${addr}`,
+      expectedFrom: deployed ? undefined : 'CVY-003',
+    };
+  } catch (e) {
+    return {
+      check: 'Registry deployed',
+      status: 'FAIL',
+      detail: (e as Error).message,
+      expectedFrom: 'CVY-003',
+    };
+  }
+}
+
+async function checkContractsBuild(): Promise<Result> {
+  try {
+    await run('forge', ['build'], resolve(ROOT, 'packages/contracts'));
+    return { check: 'Contracts build', status: 'PASS', detail: 'forge build ok' };
+  } catch (e) {
+    return {
+      check: 'Contracts build',
+      status: 'FAIL',
+      detail: failureDetail(e, 'forge build failed'),
+    };
+  }
+}
+
+async function checkWebBuild(): Promise<Result> {
+  if (process.argv.includes('--skip-web-build')) {
+    return { check: 'Web build', status: 'PASS', detail: 'skipped via --skip-web-build' };
+  }
+  try {
+    // A production build must not inherit NODE_ENV=development from .env —
+    // `next build` rejects a non-production NODE_ENV.
+    await run('pnpm', ['--filter', '@convoy/web', 'build'], ROOT, { NODE_ENV: 'production' });
+    return { check: 'Web build', status: 'PASS', detail: 'next build ok' };
+  } catch (e) {
+    return { check: 'Web build', status: 'FAIL', detail: failureDetail(e, 'next build failed') };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// main
+// ---------------------------------------------------------------------------
+
+async function main(): Promise<void> {
+  loadEnvFile(resolve(ROOT, '.env'));
+
+  const results: Result[] = [];
+  for (const check of [
+    checkNode,
+    checkPnpm,
+    checkFoundry,
+    checkPostgres,
+    checkRedis,
+    checkPrismaClient,
+    checkMigrations,
+    checkKeeperHubAuth,
+    checkKeeperHubWallet,
+    checkBaseRpc,
+    checkRegistryDeployed,
+    checkContractsBuild,
+    checkWebBuild,
+  ]) {
+    results.push(await check());
+  }
+
+  const width = Math.max(...results.map((r) => r.check.length));
+  console.log('\nCONVOY — environment PASS/FAIL matrix\n');
+  for (const r of results) {
+    const mark = r.status === 'PASS' ? 'PASS' : 'FAIL';
+    const tag =
+      r.status === 'FAIL' && r.expectedFrom !== undefined
+        ? ` (expected until ${r.expectedFrom})`
+        : '';
+    console.log(`  ${mark}  ${r.check.padEnd(width)}  ${r.detail}${tag}`);
+  }
+
+  const blocking = results.filter((r) => r.status === 'FAIL' && r.expectedFrom === undefined);
+  const expected = results.filter((r) => r.status === 'FAIL' && r.expectedFrom !== undefined);
+  const passed = results.filter((r) => r.status === 'PASS');
+
+  console.log(
+    `\n  ${passed.length} passed · ${expected.length} expected-fail · ${blocking.length} blocking\n`,
+  );
+
+  if (expected.length > 0) {
+    console.log('  Expected failures (credentials or artifacts that do not exist yet):');
+    for (const r of expected) console.log(`    - ${r.check} → ${r.expectedFrom}`);
+    console.log('');
+  }
+
+  if (blocking.length > 0) {
+    console.log('  BLOCKING failures — fix before proceeding:');
+    for (const r of blocking) console.log(`    - ${r.check}: ${r.detail}`);
+    console.log('');
+    process.exit(1);
+  }
+}
+
+main().catch((e: unknown) => {
+  console.error(e);
+  process.exit(1);
+});

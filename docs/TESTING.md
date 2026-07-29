@@ -1,0 +1,60 @@
+# Testing
+
+The test catalog from Implementation Blueprint §9. Rows are implemented by the milestone named in the
+last column; at CVY-000 the harnesses exist and the suites are empty.
+
+## Catalog
+
+| Layer              | Test name(s)                                                                                                                                                                     | Command                                            | Milestone         |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ----------------- |
+| Contract unit      | `test_openRun_setsOpen`, `test_commitAction_revertsNotOpen`, `test_commitAction_revertsDupIndex`, `test_sealRun_revertsNothingCommitted`, `test_commitAction_revertsNotOperator` | `cd packages/contracts && forge test`              | CVY-001           |
+| Invariant          | `invariant_noCommitBeforeOpen`, `invariant_noDoubleSeal`, `invariant_idxMonotonic`, `invariant_committedCountMatches`                                                            | `forge test --match-path 'test/*.invariant.t.sol'` | CVY-001           |
+| Contract fmt/build | —                                                                                                                                                                                | `forge fmt --check && forge build`                 | CVY-001           |
+| payloadHash parity | `payloadHash.parity.test.ts`                                                                                                                                                     | `pnpm --filter @convoy/kh-client test`             | CVY-002           |
+| kh-client (VCR)    | `contractCall.simulate.wouldRevert.test.ts`, `contractCall.write.executionId.test.ts`, `status.pollHint.test.ts`, `errors.classify.test.ts`, `idempotency.key.test.ts`           | `pnpm --filter @convoy/kh-client test`             | CVY-004           |
+| DB                 | `schema.migrate.test.ts`, `seed.fixtures.test.ts`                                                                                                                                | `pnpm --filter @convoy/db test`                    | CVY-005           |
+| Queue              | `queue.dedupeJobId.test.ts`, `worker.gracefulShutdown.test.ts`                                                                                                                   | `pnpm --filter @convoy/worker test`                | CVY-006           |
+| State machine      | `orchestrator.3item.e2e.test.ts`, `guards.committedRequiresApprove.test.ts`, `guards.landedRequiresTxHash.test.ts`                                                               | `pnpm --filter @convoy/worker test`                | CVY-008           |
+| Planner eval       | `planner.recall.eval.ts` (≥0.9), `planner.validJson.eval.ts` (≥95%)                                                                                                              | `pnpm tsx tests/planner.recall.eval.ts`            | CVY-010           |
+| Critic eval        | `critic.veto.eval.ts` (≥4/5 invalid, 5/5 valid, 0 false)                                                                                                                         | `pnpm tsx tests/critic.veto.eval.ts`               | CVY-011           |
+| Simulation         | `critic.corroboration.test.ts` (APPROVE overridden to VETO)                                                                                                                      | vitest                                             | CVY-011           |
+| Retry              | `retry.transientOnly.test.ts` (retries E-0002/N-0001, never config-revert)                                                                                                       | vitest                                             | CVY-008           |
+| Failure recovery   | `reconcile.crashResume.test.ts`, `killworker.noDuplicateTx.test.ts`                                                                                                              | `pnpm --filter @convoy/worker test`                | CVY-015           |
+| API                | `api.runs.create.test.ts`, `api.stream.replay.test.ts`, `api.manifest.export.test.ts`                                                                                            | `pnpm --filter @convoy/web test`                   | CVY-009 / CVY-012 |
+| Frontend           | `timeline.render.test.tsx`, `budgetMeter.amber.test.tsx`                                                                                                                         | vitest                                             | CVY-007 / CVY-009 |
+| E2E                | `demo.spec.ts` (the exact 3:00 run), `refresh.replay.spec.ts`                                                                                                                    | `pnpm --filter @convoy/web exec playwright test`   | CVY-009 / CVY-019 |
+| Regression         | full `pnpm -r test && forge test` on every PR                                                                                                                                    | `.github/workflows/ci.yml`                         | CVY-000           |
+| Deploy verify      | `scripts/verify-env.ts` PASS/FAIL matrix; Basescan verified check                                                                                                                | `pnpm tsx scripts/verify-env.ts`                   | CVY-000           |
+| Demo validation    | daily Playwright `demo.spec.ts` (week 3)                                                                                                                                         | scheduled CI                                       | CVY-019           |
+
+## Integration modes
+
+Toggled by `CONVOY_KH_MODE`:
+
+- **`live`** — Base Sepolia (84532) against the real KeeperHub API. Used for rehearsal and smoke
+  tests before any mainnet run.
+- **`vcr`** — recorded fixture tapes replayed offline. Keeps UI development unblocked when
+  KeeperHub is unavailable or credentials are absent.
+
+## Running everything
+
+```bash
+pnpm format:check
+pnpm -r lint
+pnpm -r typecheck
+pnpm -r build
+pnpm -r test
+(cd packages/contracts && forge fmt --check && forge build && forge test)
+pnpm tsx scripts/verify-env.ts
+```
+
+## Testing rules
+
+- **Never stage a failure to make a test pass or a demo dramatic.** Invalid items point at
+  `MockRewardDistributor`, which genuinely reverts. That is the only source of failure in the system.
+- Fabricated transaction hashes are banned in non-test code and are caught by a CI grep-guard.
+- Tests that need credentials the repository does not have must **fail loudly or skip explicitly** —
+  never assert a fake pass.
+- Agent evals are gates, not diagnostics: the Critic's `5/5 valid, zero false vetoes` bar blocks the
+  milestone.
+- The kill-worker test is the reliability centrepiece and is never cut.

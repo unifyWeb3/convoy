@@ -1,0 +1,54 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+build/
+out/
+.next/
+*.tsbuildinfo
+
+# Foundry
+# lib/ is NOT ignored: forge-std is a git submodule and its pinned revision
+# (together with foundry.lock) is what makes contract builds reproducible.
+packages/contracts/cache/
+packages/contracts/out/
+packages/contracts/broadcast/
+
+# Prisma generated client
+packages/db/src/generated/
+packages/db/node_modules/.prisma/
+
+# env / secrets — NEVER commit real values
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.keeperhub/
+
+# test / tooling artifacts
+coverage/
+.vitest/
+playwright-report/
+test-results/
+.playwright/
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# editors / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# WSL / Windows download metadata (alternate data streams)
+*:Zone.Identifier
+
+# vercel
+.vercel

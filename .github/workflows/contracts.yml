@@ -1,0 +1,50 @@
+name: Contracts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/contracts/**'
+      - '.github/workflows/contracts.yml'
+  pull_request:
+    paths:
+      - 'packages/contracts/**'
+      - '.github/workflows/contracts.yml'
+  workflow_call:
+
+jobs:
+  forge:
+    name: forge build / test / fmt
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/contracts
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Install dependencies
+        run: forge install
+
+      - name: Format check
+        run: forge fmt --check
+
+      - name: Build
+        run: forge build --sizes
+
+      - name: Unit tests
+        run: forge test -vvv
+
+      # Ordering guarantees are the reason the registry's storage is
+      # load-bearing: open -> commit -> seal, no commit before open, no double
+      # seal, idx monotonic, committedCount matches. Configured in foundry.toml
+      # at runs=1000 depth=32.
+      - name: Invariant tests
+        run: |
+          if ls test/*.invariant.t.sol >/dev/null 2>&1 && grep -rq "invariant_" test/; then
+            forge test --match-path 'test/*.invariant.t.sol' -vvv
+          else
+            echo "No invariant tests yet (they land in CVY-001)."
+          fi
