@@ -2,7 +2,8 @@
 
 The test catalog from Implementation Blueprint §9. Rows are implemented by the milestone named in the
 last column; at CVY-000 the harnesses exist and the suites are empty. As of CVY-001 the three
-contract rows are implemented and green — 45 Foundry tests, invariants at `runs=1000 depth=32`.
+contract rows are implemented and green — 45 Foundry tests, invariants at `runs=1000 depth=32`. As
+of CVY-002 the payloadHash-parity row is green too — 47 assertions over 13 dumped fixtures.
 
 ## Catalog
 
@@ -11,7 +12,7 @@ contract rows are implemented and green — 45 Foundry tests, invariants at `run
 | Contract unit      | `test_openRun_setsOpen`, `test_commitAction_revertsNotOpen`, `test_commitAction_revertsDupIndex`, `test_sealRun_revertsNothingCommitted`, `test_commitAction_revertsNotOperator` | `cd packages/contracts && forge test`              | CVY-001           |
 | Invariant          | `invariant_noCommitBeforeOpen`, `invariant_noDoubleSeal`, `invariant_idxMonotonic`, `invariant_committedCountMatches`                                                            | `forge test --match-path 'test/*.invariant.t.sol'` | CVY-001           |
 | Contract fmt/build | —                                                                                                                                                                                | `forge fmt --check && forge build`                 | CVY-001           |
-| payloadHash parity | `payloadHash.parity.test.ts`                                                                                                                                                     | `pnpm --filter @convoy/kh-client test`             | CVY-002           |
+| payloadHash parity | `payloadHash.parity.test.ts` (13 dumped fixtures × 3 assertions + 8 behavioural)                                                                                                 | `pnpm --filter @convoy/kh-client test`             | CVY-002           |
 | kh-client (VCR)    | `contractCall.simulate.wouldRevert.test.ts`, `contractCall.write.executionId.test.ts`, `status.pollHint.test.ts`, `errors.classify.test.ts`, `idempotency.key.test.ts`           | `pnpm --filter @convoy/kh-client test`             | CVY-004           |
 | DB                 | `schema.migrate.test.ts`, `seed.fixtures.test.ts`                                                                                                                                | `pnpm --filter @convoy/db test`                    | CVY-005           |
 | Queue              | `queue.dedupeJobId.test.ts`, `worker.gracefulShutdown.test.ts`                                                                                                                   | `pnpm --filter @convoy/worker test`                | CVY-006           |
@@ -54,6 +55,34 @@ having exercised almost nothing (gap G-13). `ConvoyRegistryHandler` therefore:
 `invariant_idxMonotonic` asserts monotonicity of the **sequence** (`committedCount`, emitted as
 `seq`), not of `idx`: the frozen contract accepts any non-duplicate `idx` and enforces ordering
 through the counter. The name is the blueprint's and was kept.
+
+## Reading the payloadHash parity suite (CVY-002)
+
+`tests/fixtures/payloadHash.fixtures.json` is **generated**, not hand-written — a hand-written
+fixture only proves TypeScript agrees with what its author believed Solidity does. Regenerate it
+with:
+
+```bash
+cd packages/contracts && forge script script/DumpPayloadHashFixtures.s.sol
+```
+
+The dump is deterministic: re-running leaves the file byte-identical, so `git diff` silence is itself
+evidence the committed fixtures came from the committed script. The file is `.prettierignore`d for
+the same reason (D-014).
+
+Each fixture carries `argTypes` + `argValues` rather than only the precomputed `args` bytes, so the
+test re-encodes the arguments in TypeScript and asserts (a) the bytes equal Solidity's and (b) the
+hash matches (D-012). The cases chosen are the ones where an encoder realistically diverges: empty
+args (Solidity's zero-length `bytes` vs viem's `"0x"`), an empty function name, a 103-character
+function name crossing word boundaries, multi-byte UTF-8 in a `string`, a 33-byte `bytes` blob,
+`address[]`, `uint256[]`, a negative `int256`, `uint256` max, and `idx` at `uint256` max.
+
+**If a case fails, do not switch to the documented fallback encoding to make it green.** That is a
+frozen-spec change requiring a numbered decision, and it would mask what is almost certainly a
+fixture-plumbing or argument-encoding bug. **Falsifiability:** adding 1 to `idx` inside
+`payloadHash()` fails 26 of the 47 assertions.
+
+## Reading the invariant suite — falsifiability (CVY-001)
 
 **Falsifiability.** The two counting invariants were mutation-tested: changing the contract's
 `committedCount += 1` to `+= 2` fails both `invariant_idxMonotonic` and

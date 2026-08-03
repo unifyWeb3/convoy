@@ -7,8 +7,10 @@ from genuine failures, and exports one replayable manifest.
 
 Built for the KeeperHub **Agents Onchain** hackathon (DoraHacks). Chain: **Base mainnet (8453)**.
 
-> **Status:** CVY-001 complete — both contracts implemented and tested (45 Foundry tests, invariants
-> at runs=1000 depth=32). Nothing is deployed yet; no transaction hash is claimed.
+> **Status:** CVY-002 complete — contracts implemented and tested (45 Foundry tests), the payload
+> commitment proven byte-identical across Solidity and TypeScript (47 assertions over 13 dumped
+> fixtures), and the deploy script written. Nothing is deployed yet; no transaction hash is claimed.
+> CVY-003 (the first real Base transaction) is blocked on operator credentials.
 > Live status: [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md).
 
 ---
@@ -26,6 +28,7 @@ milestones land — a row without an artifact link is not a claim Convoy makes.
 | Convoy never holds a private key                        | Runtime holds only a revocable `kh_` key; `PRIVATE_KEY` is grep-guarded to `packages/contracts/script`                                                                                 | `.github/workflows/ci.yml`                                                                                           | CVY-000           | ENFORCED |
 | No failure is ever staged                               | CI grep-guard bans staged-failure patterns in non-test code; invalid items point at a contract that genuinely reverts                                                                  | `.github/workflows/ci.yml` · `packages/contracts/src/MockRewardDistributor.sol` (`test_preconditionChain_isGenuine`) | CVY-000 / CVY-001 | ENFORCED |
 | Ordering commitments are tamper-evident onchain         | `ConvoyRegistry` storage — `state`, `committedCount`, `payloadHash[runId][idx]` — is one-shot per index and operator-bound, proven by handler-based invariants at `runs=1000 depth=32` | `packages/contracts/test/ConvoyRegistry.invariant.t.sol`                                                             | CVY-001           | ENFORCED |
+| The onchain payload commitment means what Convoy says   | `payloadHash` is byte-identical in Solidity and TypeScript, asserted against 13 fixtures dumped from real Solidity output — not hand-written                                           | `tests/fixtures/payloadHash.fixtures.json` · `packages/kh-client/test/payloadHash.parity.test.ts`                    | CVY-002           | ENFORCED |
 | Retries are genuine                                     | Onchain retries come from KeeperHub's transient handling and are only observed and recorded                                                                                            | _retry chip / manifest line pending_                                                                                 | CVY-015           | PENDING  |
 | The budget meter is not fabricated                      | Gas leg from real `gasUsedWei`; payment leg from real x402 settlements                                                                                                                 | _pending_                                                                                                            | CVY-007 / CVY-017 | PENDING  |
 | The manifest reconciles independent sources             | KeeperHub status ↔ ConvoyRegistry events read from chain ↔ Convoy ledger                                                                                                               | _manifest export pending_                                                                                            | CVY-012           | PENDING  |

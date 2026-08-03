@@ -38,6 +38,27 @@ and are no longer accepted. One key covers Base.
 Record each address in `.env` (`CONVOY_REGISTRY_ADDR`, `MOCK_DISTRIBUTOR_ADDR`), in the Vercel
 dashboard, and in the README artifact table.
 
+### The deploy script (written at CVY-002, run at CVY-003)
+
+`packages/contracts/script/Deploy.s.sol` deploys `ConvoyRegistry` and `MockRewardDistributor` in one
+broadcast and prints both addresses. It is parameterised by the chain it is pointed at:
+
+```bash
+cd packages/contracts
+forge script script/Deploy.s.sol --rpc-url base_sepolia --broadcast --verify   # 84532, first
+forge script script/Deploy.s.sol --rpc-url base         --broadcast --verify   # 8453
+```
+
+Two guards stand between a stray command and a real deploy:
+
+1. **Chain allowlist.** `block.chainid` must be 8453 or 84532; anything else reverts
+   `UnsupportedChain(chainId)`. Verified — running the script with no `--rpc-url` reverts
+   `UnsupportedChain(31337)` rather than doing anything.
+2. **Key must be present.** `vm.envUint("DEPLOYER_PRIVATE_KEY")` reverts when the variable is unset.
+
+Without `--broadcast`, `forge script` only simulates. `DEPLOYER_PRIVATE_KEY` is read here and nowhere
+else in the repository; the CI grep-guard enforces that.
+
 ## Environment by surface
 
 | Surface                            | Needs                                                                                                                                                                                                                                           |

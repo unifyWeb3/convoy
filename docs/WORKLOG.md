@@ -83,3 +83,44 @@ events or access control), D-010 (handler bias + coverage counters) and D-011 (i
 ghosts + mutation test) recorded. No KeeperHub proof: this milestone touches no
 KeeperHub surface and deploys nothing. The roadmap's "hard Day-2 deadline" for CVY-003 has passed
 unmet — the slip is recorded in IMPLEMENTATION_STATUS.md and is not re-baselined here.
+
+---
+
+## 2026-08-03 — CVY-002 payloadHash parity (Sol↔TS) + deploy script
+
+Summary: Pinned the payload commitment byte-for-byte across Solidity and TypeScript, proven on 13
+fixtures dumped from real Solidity output by a forge script rather than hand-written. Added
+`payloadHash()` and `encodeArgs()` to `@convoy/kh-client` and re-exported them from the package
+entry point, and wrote `Deploy.s.sol` for Base Sepolia (84532) and Base mainnet (8453). The frozen
+blueprint A4 encoding was used unchanged; the documented fallback encoding was not needed.
+
+Files: packages/contracts/script/DumpPayloadHashFixtures.s.sol,
+packages/contracts/script/Deploy.s.sol, packages/contracts/foundry.toml,
+packages/kh-client/src/payloadHash.ts, packages/kh-client/src/index.ts,
+packages/kh-client/test/payloadHash.parity.test.ts, packages/kh-client/package.json,
+tests/fixtures/payloadHash.fixtures.json, .github/workflows/ci.yml,
+.convoy/checklists/review.md, .prettierignore, pnpm-lock.yaml, docs/IMPLEMENTATION_STATUS.md,
+docs/KNOWN_GAPS.md, docs/DECISIONS.md, docs/TESTING.md, docs/DEPLOYMENT.md, docs/WORKLOG.md,
+README.md, docs/milestones/CVY-002.md
+
+Commit: c5dedf2
+
+Verification: 47 parity assertions green across 13 fixtures on the first run; forge test still
+45 passed / 0 failed; forge fmt --check clean; forge build clean (the CVY-001 "AST source not found
+for Deploy.s.sol" warning is gone now that the script has real content); pnpm format:check clean;
+pnpm -r lint / typecheck / build / test clean; all four CI grep-guards return no output; the fixture
+dump is deterministic (identical md5 across two runs, no git diff); the deploy script's chain guard
+verified by a real stray run, which reverted `UnsupportedChain(31337)`.
+
+Notes: Parity held on the first attempt for every case including the ones most likely to diverge —
+empty args (Solidity zero-length `bytes` vs viem's `"0x"`), an empty function name, a 103-character
+function name, multi-byte UTF-8 in a dynamic string, a 33-byte `bytes` blob, `address[]`,
+`uint256[]`, a negative `int256`, and `idx` at `uint256` max. Falsifiability was checked rather than
+assumed: adding 1 to `idx` inside `payloadHash()` fails 26 of the 47 assertions. G-15 records that
+compiling `Deploy.s.sol` emits a build artifact containing the string `PRIVATE_KEY`, which tripped
+the key grep-guard locally (CI unaffected — clean checkout, `out/` gitignored); guards 1, 3 and 4
+now exclude build output. G-16 records that `test/` sits outside the typecheck gate, accepted as the
+CVY-000 convention. Decisions D-012…D-015 recorded. Off-card but required: viem added to kh-client,
+`fs_permissions` scoped to the fixtures directory in foundry.toml, the generated fixture file added
+to `.prettierignore`. Nothing was deployed and no transaction hash is claimed. **CVY-003 is blocked
+on four operator credentials that still do not exist.**

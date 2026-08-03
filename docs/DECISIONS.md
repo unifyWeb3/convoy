@@ -102,3 +102,36 @@ anything: mutating `committedCount += 1` to `+= 2` in the contract must turn the
 does — both `invariant_idxMonotonic` and `invariant_committedCountMatches` fail on the first
 accepted commit. Re-run that mutation whenever the handler's ghost state is refactored; a green
 invariant that cannot fail is worse than no invariant, because it is trusted.
+
+**D-012 2026-08-03: parity fixtures carry `argTypes` + `argValues`, not just precomputed `args`
+bytes.**
+A fixture that only carried Solidity's `args` bytes plus the expected hash would prove that
+TypeScript can hash a byte string — which viem obviously can. The interesting failure is in the
+_argument encoding_: whether `encodeAbiParameters` over `address[]`, a negative `int256`, or
+multi-byte UTF-8 in a `string` produces the same bytes Solidity's `abi.encode` did. The fixtures
+therefore carry the types and the values, TypeScript re-encodes them independently, and the test
+asserts both that the re-encoded bytes equal Solidity's and that the resulting hash matches. Values
+travel as strings because JSON numbers cannot represent `uint256`.
+
+**D-013 2026-08-03: `fs_permissions` in `foundry.toml` is scoped to the fixtures directory only.**
+`DumpPayloadHashFixtures.s.sol` needs to write outside the Foundry project root
+(`../../tests/fixtures`), which Foundry refuses without an explicit grant. The grant names exactly
+one directory and grants only `write`. A blanket `access = "read-write"` on `"./"` would have been
+one line shorter and would have let any future script write anywhere in the repository.
+
+**D-014 2026-08-03: the generated fixture file is `.prettierignore`d.**
+Prettier wanted to reformat the JSON the forge script emits. Letting it would mean every
+`forge script DumpPayloadHashFixtures` run dirties the working tree, and "the fixtures are dumped,
+not hand-written" would quietly stop being verifiable — you could no longer re-run the dump and get
+`git diff` silence. The file is a build artifact and is treated like one, alongside
+`packages/db/src/generated/`.
+
+**D-015 2026-08-03: the CI grep-guards exclude build output.**
+See G-15. Compiling `Deploy.s.sol` produces `out/Deploy.s.sol/Deploy.json` containing the string
+`PRIVATE_KEY`, so the "no private key" guard went red on a correct repository. CI never saw it — that
+job checks out a clean tree and `out/` is gitignored — but the guards are mirrored into
+`.convoy/checklists/review.md` specifically so a human can paste them into a terminal, and there they
+failed. `--exclude-dir=out --exclude-dir=dist --exclude-dir=node_modules` was added to the three
+guards that scan broadly. The guards' semantics are unchanged; only uncommitted generated output is
+skipped. A guard that cries wolf is a guard that gets ignored, and these guards are the mechanism
+that makes "no held keys" a claim rather than an aspiration.
