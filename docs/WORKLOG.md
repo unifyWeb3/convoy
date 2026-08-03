@@ -37,3 +37,44 @@ FAIL by design and are reported as expected failures rather than faked. Recorded
 the blueprint, plus G-07/G-08/G-09 for three conflicts between the Product Discovery Report and the
 frozen Architecture — resolved in the architecture's favour in every case, never by redesigning.
 Decisions D-001…D-005 recorded.
+
+---
+
+## 2026-08-03 — CVY-001 ConvoyRegistry + MockRewardDistributor + Foundry tests
+
+Summary: Implemented both contracts exactly as frozen in ARCHITECTURE §8 — no additions, no
+optimisations, no extra functions — with 45 green Foundry tests. `ConvoyRegistry` ships the
+`None/Open/Sealed` enum, the packed `Run` struct, the `runs`/`payloadHash`/`committed` mappings,
+three events, six custom errors, and `openRun`/`commitAction`/`sealRun`/`isCommitted`.
+`MockRewardDistributor` implements the genuine precondition chain `setRoot → fund → enableMarket`.
+Unit tests cover every happy and revert path including the five named on the task card; a
+`StdInvariant` handler drives the four named invariants (plus `invariant_operatorIsOpener`) at
+runs=1000 depth=32.
+
+Files: packages/contracts/src/ConvoyRegistry.sol, packages/contracts/src/MockRewardDistributor.sol,
+packages/contracts/test/ConvoyRegistry.t.sol, packages/contracts/test/ConvoyRegistry.invariant.t.sol,
+packages/contracts/test/MockRewardDistributor.t.sol, docs/IMPLEMENTATION_STATUS.md,
+docs/KNOWN_GAPS.md, docs/DECISIONS.md, docs/TESTING.md, docs/WORKLOG.md, README.md,
+docs/milestones/CVY-001.md
+
+Commit: see docs/milestones/CVY-001.md §10
+
+Verification: forge test 45 passed / 0 failed across 3 suites; invariants 5×(runs 1000, calls 32000,
+reverts 0); forge fmt --check clean; forge build --sizes clean (ConvoyRegistry runtime 1,538 B);
+pnpm format:check clean; pnpm -r lint clean; pnpm -r typecheck clean; pnpm -r build 4 packages;
+pnpm -r test passes with no TS test files yet; all four CI grep-guards return no output.
+foundry.toml was already correct from CVY-000 (optimizer, [invariant] runs=1000 depth=32,
+[etherscan]) and was not modified.
+
+Notes: `AlreadySealed()` is declared in the frozen source but is unreachable — `openRun` guards on
+`state != None`, so reopening a sealed run reverts `AlreadyOpen()`. Recorded as G-10 and pinned by a
+unit test; **not** reconciled. G-11 records the `unchecked` uint32 counter increment, also left as
+frozen. G-12 records that blueprint A4 places a `payloadHash` helper "in ConvoyRegistry" while the
+frozen §8 source has none — architecture wins, the helper lands in CVY-002's fixture-dump script.
+G-13 records that `fail_on_revert = false` makes green invariants meaningless without coverage
+evidence: uniform actor selection was measured landing `accepted open/commit/seal: 4 0 0` over 32
+calls, so the handler now biases towards the run's operator (4 5 1 accepted after the fix) and
+prints accepted/rejected counters. Decisions D-009 (mock ships without events or access control) and
+D-010 (handler bias + coverage counters) recorded. No KeeperHub proof: this milestone touches no
+KeeperHub surface and deploys nothing. The roadmap's "hard Day-2 deadline" for CVY-003 has passed
+unmet — the slip is recorded in IMPLEMENTATION_STATUS.md and is not re-baselined here.

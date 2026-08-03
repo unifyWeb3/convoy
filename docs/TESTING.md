@@ -1,7 +1,8 @@
 # Testing
 
 The test catalog from Implementation Blueprint §9. Rows are implemented by the milestone named in the
-last column; at CVY-000 the harnesses exist and the suites are empty.
+last column; at CVY-000 the harnesses exist and the suites are empty. As of CVY-001 the three
+contract rows are implemented and green — 45 Foundry tests, invariants at `runs=1000 depth=32`.
 
 ## Catalog
 
@@ -35,6 +36,24 @@ Toggled by `CONVOY_KH_MODE`:
   tests before any mainnet run.
 - **`vcr`** — recorded fixture tapes replayed offline. Keeps UI development unblocked when
   KeeperHub is unavailable or credentials are absent.
+
+## Reading the invariant suite (CVY-001)
+
+`foundry.toml` freezes `[invariant] fail_on_revert = false`. That setting silently discards a fuzz
+call that reverts, so a handler which rejects nearly everything still reports 1000 green runs while
+having exercised almost nothing (gap G-13). `ConvoyRegistryHandler` therefore:
+
+- wraps every registry call in `try/catch` and counts **accepted vs rejected** calls per function,
+  printed by `afterInvariant()` — run with `-vv` to see the campaign's real depth;
+- biases the actor for `commitAction` / `sealRun` towards the run's own operator (one seed in four
+  still picks at random, keeping `NotOperator()` reachable). Uniform actor selection was measured
+  landing `accepted open/commit/seal: 4 0 0` — the lifecycle never got past its first commit;
+- is backed by `test_handler_reachesEveryState`, a deterministic test proving every accepted and
+  every rejected path is reachable, so the fuzz counters measure a real lifecycle.
+
+`invariant_idxMonotonic` asserts monotonicity of the **sequence** (`committedCount`, emitted as
+`seq`), not of `idx`: the frozen contract accepts any non-duplicate `idx` and enforces ordering
+through the counter. The name is the blueprint's and was kept.
 
 ## Running everything
 

@@ -69,3 +69,25 @@ committed submodule pointer plus `foundry.lock` pin the exact revision, so contr
 reproducible from a clean clone and in CI. The initial `.gitignore` excluded `lib/`, which would
 have left the pinned revision unrecorded and reintroduced the revision-mismatch warning seen during
 the first bootstrap run. `cache/`, `out/`, and `broadcast/` remain ignored.
+
+**D-009 2026-08-03: `MockRewardDistributor` ships with no events and no access control.**
+Architecture §8 names exactly three functions (`setRoot`, `fund`, `enableMarket`) and one
+requirement — that they _genuinely revert_ on unmet preconditions. Events, an owner, and a token
+transfer would all be defensible in a real distributor and are all additions to a frozen surface, so
+none were added. The contract's entire job is to be an honest revert source for the Critic; the
+proof surface is `ConvoyRegistry`, which does emit. The precondition chain implemented is
+`setRoot → fund → enableMarket`, with `fund` before `setRoot` reverting `RootNotSet()` as the
+canonical case named in the architecture.
+
+**D-010 2026-08-03: the invariant handler biases its actor towards the run's operator, and reports
+accepted-vs-rejected call counts.**
+`openRun` is permissionless, so the opener becomes the operator; with a uniformly random actor drawn
+from three, only one commit in three could be accepted. Measured on a real campaign, that produced
+`accepted open/commit/seal: 4 0 0` over 32 calls — 1000 green runs proving essentially nothing,
+because `fail_on_revert = false` discards the rejected calls silently (gap G-13). The handler now
+routes three seeds in four to the run's own operator, keeps the fourth random so `NotOperator()`
+stays reachable, counts accepted and rejected calls per function, and prints them from
+`afterInvariant()`. The campaign-non-empty assertion deliberately checks _calls driven_ rather than
+_calls accepted_, because the latter is not guaranteed by the fuzzer and a flaky CI check is worse
+than no check; reachability is guaranteed instead by the deterministic
+`test_handler_reachesEveryState`.

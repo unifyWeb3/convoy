@@ -1,12 +1,12 @@
-# Convoy Implementation Status (updated 2026-07-29)
+# Convoy Implementation Status (updated 2026-08-03)
 
-Overall: **5% (CVY-000 done)** Next milestone: **CVY-001 — ConvoyRegistry + MockRewardDistributor + Foundry tests**
+Overall: **10% (CVY-000, CVY-001 done)** Next milestone: **CVY-002 — payloadHash parity (Sol↔TS) + deploy script**
 
 | ID        | Milestone                                                   | Status      | %   | Notes                                                                       |
 | --------- | ----------------------------------------------------------- | ----------- | --- | --------------------------------------------------------------------------- |
 | CVY-000   | Repo bootstrap + toolchain                                  | DONE        | 100 | Monorepo builds empty; `.convoy/` populated; CI grep-guards live            |
-| CVY-001   | Contracts + Foundry unit/invariant tests                    | TODO        | 0   | **next**                                                                    |
-| CVY-002   | payloadHash parity (Sol↔TS) + deploy script                 | TODO        | 0   |                                                                             |
+| CVY-001   | Contracts + Foundry unit/invariant tests                    | DONE        | 100 | 45 tests green; invariants at runs=1000 depth=32; gap G-10 recorded         |
+| CVY-002   | payloadHash parity (Sol↔TS) + deploy script                 | TODO        | 0   | **next**                                                                    |
 | CVY-003   | Deploy+verify on Base; **FIRST REAL BASE TX**               | TODO        | 0   | Hard Day-2 deadline; needs KH key, Base RPC, Etherscan V2 key, deployer key |
 | CVY-004   | kh-client: write + simulate + status + errors + idempotency | TODO        | 0   | Highest external risk (G-01/G-02/G-03)                                      |
 | CVY-005   | DB package: Prisma schema, migrations, seed                 | TODO        | 0   |                                                                             |
@@ -35,6 +35,15 @@ Overall: **5% (CVY-000 done)** Next milestone: **CVY-001 — ConvoyRegistry + Mo
 
 The first real Base transaction (CVY-003) is front-loaded to Day 2 so the hackathon submission
 requirement is provisionally met before any feature work.
+
+### Schedule slip (recorded 2026-08-03, not re-baselined)
+
+The roadmap's calendar days and the elapsed calendar have diverged. CVY-001 is a **D1** milestone and
+closed on 2026-08-03; the "hard Day-2 deadline" for the first real Base transaction (CVY-003) has
+therefore passed unmet. Nothing has been re-baselined here — the roadmap day labels are left as
+frozen, and the submission deadline (Aug 13 2026 12:00 UTC+2, 10 days out) is unchanged. **The
+decision on how to absorb the slip belongs to the operator**, and the blocking input below is the
+reason CVY-003 cannot simply be pulled forward: it needs four credentials that do not yet exist.
 
 ## Cut order (apply in this exact sequence if week 2 slips)
 
