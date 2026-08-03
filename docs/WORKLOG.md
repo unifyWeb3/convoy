@@ -172,3 +172,50 @@ DEC-001 assumes KeeperHub direct execution works on 84532. PRODUCT_DISCOVERY §K
 it — Base Sepolia is in the supported chain list and the 8453-only restriction applies to
 agentic-wallet signing (which is G-17) — but it cannot be verified offline and is proven at
 CVY-003/CVY-004 with a real key. CVY-003's fallback #1 now covers the case where it is false.
+
+---
+
+## DEC-001 closeout — 2026-08-03 — premise verified, G-19 swept and CLOSED
+
+Not a milestone. Three things: a status-tracking fix, the live verification of DEC-001's one
+unproven premise, and the G-19 sweep.
+
+**Tracking bug fixed.** `docs/IMPLEMENTATION_STATUS.md` named CVY-003 as "**next**". It is not:
+CVY-003's own card requires "a minimal write path from CVY-004", and CVY-004's card lists CVY-003
+among the things it blocks. The dependency order is **002 → 004 → 003**, and the critical-path line
+had it inverted as `002 → 003 → (004)`. Also stale: CVY-003 was marked "BLOCKED on operator
+credentials" when all four now exist, and DEC-001 was absent from the milestone table entirely.
+CVY-003 remains **unfinished** — nothing is deployed, no hash is claimed; it is simply not next.
+
+**DEC-001's premise is VERIFIED, not inferred.** One `simulate:true` call to
+`POST /api/execute/contract-call` with `chainId:"84532"` / `network:"84532"`, targeting the WETH9
+predeploy with an explicit `abi`, returned **HTTP 200**
+`{"success":true,"status":"simulated","wouldRevert":false,"gasEstimate":"25989"}` plus a real `from`
+address — so the org Turnkey wallet is provisioned for 84532 and does not 422. No `executionId` is
+returned for a simulate, and no validation errors were returned. Because the primary returned a
+simulate-shaped response, the 8453 control run was not needed and was not made. Redacted request and
+response recorded at `packages/kh-client/test/vcr/dec-001.simulate.84532.probe.json`. The probe ran
+from outside the repository on purpose — `packages/kh-client` is the only module permitted to reach
+`app.keeperhub.com` and it does not exist yet.
+
+**Response-shape drift worth noting for CVY-004:** the live simulate response is
+`{success, status:"simulated", from, to, value, gasEstimate, simulatedReturnValue, wouldRevert}`.
+CLAUDE.md documents `{wouldRevert, gasEstimate, ...}`; the extra fields are additive, so no gap is
+recorded, but the client's types are modelled on the observed shape rather than the documented one.
+
+**G-19 swept and CLOSED.** All twelve stale references fixed, including the three named explicitly:
+`.convoy/playbooks/release.md` step 2 is now "OPTIONAL, CVY-019 flip only" with a skip-by-default
+banner (it was instructing a mainnet deploy as step 2 of the authoritative release sequence);
+`.convoy/agents/principal-blockchain.md:50` now asserts `Number(eth_chainId) === 84532` numerically;
+`README.md:8` and its three artifact rows name Base Sepolia 84532. Re-running the regeneration
+command still returns hits **by design** — 8453 survives wherever it correctly names the optional
+CVY-019 target, the `Deploy.s.sol` chain allowlist, CVY-003's fallback, or the dual-chain Etherscan
+key. Every survivor is annotated with a verdict in the G-19 detail section. A zero-hit result would
+have meant the optional mainnet path had been deleted, which DEC-001 explicitly forbids.
+
+Files changed: docs/IMPLEMENTATION_STATUS.md, docs/KNOWN_GAPS.md, docs/DECISIONS.md,
+docs/DEPLOYMENT.md, docs/TESTING.md, docs/AI_WORKFLOW.md, README.md, .convoy/playbooks/release.md,
+.convoy/playbooks/demo.md, .convoy/agents/principal-blockchain.md,
+.convoy/agents/lead-protocol-engineer.md, .convoy/instructions/coding-standards.md,
+.convoy/checklists/milestone-done.md, .convoy/templates/pr.md, .convoy/tasks/CVY-003.md,
+packages/kh-client/test/vcr/dec-001.simulate.84532.probe.json, docs/WORKLOG.md

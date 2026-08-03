@@ -35,7 +35,7 @@ Run this before declaring any CVY-XXX complete. Every box must be YES, or the mi
 - [ ] No private key held anywhere outside `packages/contracts/script`.
 - [ ] No staged failure, injected gas spike, fabricated hash, or fabricated retry.
 - [ ] Every state transition is transactional and emits exactly one `events` row.
-- [ ] The chain stays pinned to Base 8453; no `eth_getLogs` on a public RPC.
+- [ ] The chain stays pinned to Base Sepolia 84532 (DEC-001); no `eth_getLogs` on a public RPC.
 
 ## KeeperHub proof (if the integration was touched)
 

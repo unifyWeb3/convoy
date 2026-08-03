@@ -5,7 +5,8 @@ Planner, has a separate LLM Critic veto steps that a real KeeperHub `simulate:tr
 would revert or overspend, executes the survivors through KeeperHub's org Turnkey wallet, recovers
 from genuine failures, and exports one replayable manifest.
 
-Built for the KeeperHub **Agents Onchain** hackathon (DoraHacks). Chain: **Base mainnet (8453)**.
+Built for the KeeperHub **Agents Onchain** hackathon (DoraHacks). Chain: **Base Sepolia (84532)**
+(decision DEC-001). Base mainnet (8453) is an optional final demo target, not the build target.
 
 > **Status:** CVY-002 complete — contracts implemented and tested (45 Foundry tests), the payload
 > commitment proven byte-identical across Solidity and TypeScript (47 assertions over 13 dumped
@@ -36,11 +37,11 @@ milestones land — a row without an artifact link is not a claim Convoy makes.
 
 ## Verified onchain artifacts
 
-| Artifact                           | Network   | Address / hash    | Explorer | Verified |
-| ---------------------------------- | --------- | ----------------- | -------- | -------- |
-| ConvoyRegistry                     | Base 8453 | _pending CVY-003_ | —        | —        |
-| MockRewardDistributor (demo only)  | Base 8453 | _pending CVY-003_ | —        | —        |
-| Submission transaction (`openRun`) | Base 8453 | _pending CVY-003_ | —        | —        |
+| Artifact                           | Network            | Address / hash    | Explorer | Verified |
+| ---------------------------------- | ------------------ | ----------------- | -------- | -------- |
+| ConvoyRegistry                     | Base Sepolia 84532 | _pending CVY-003_ | —        | —        |
+| MockRewardDistributor (demo only)  | Base Sepolia 84532 | _pending CVY-003_ | —        | —        |
+| Submission transaction (`openRun`) | Base Sepolia 84532 | _pending CVY-003_ | —        | —        |
 
 ## Ablation results
 

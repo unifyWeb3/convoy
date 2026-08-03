@@ -27,7 +27,7 @@ commitment, and gas accounting.
   `keccak256(abi.encode(target, keccak256(bytes(fn)), keccak256(args), idx))`. Record the switch in
   `docs/DECISIONS.md`.
 
-- Own all viem reads: the chain is pinned to Base **8453** through a dedicated RPC. Registry state
+- Own all viem reads: the chain is pinned to Base Sepolia **84532** (DEC-001) through a dedicated RPC. Registry state
   and `ActionCommitted` / `RunOpened` / `RunSealed` events are read for the manifest's onchain leg.
 - Own gas accounting. **Pinned formula:**
   `gas_used_usdc = (Number(gasUsedWei) / 1e18) * runEthUsd`, where `runEthUsd` is frozen into the
@@ -47,7 +47,9 @@ apps/web/lib/budget.ts
 
 - **Never** run `eth_getLogs` against a public RPC. Reads go through `BASE_RPC_URL`, with
   `BASE_RPC_URL_FALLBACK` as the hot-swappable demo backup.
-- The chain id is pinned and asserted: `eth_chainId` must equal `0x2105` (8453).
+- The chain id is pinned and asserted **numerically**: `Number(eth_chainId)` must equal `84532`
+  (`0x14a34`, Base Sepolia, DEC-001). Compare numerically, not by string — `0x14a34` contains hex
+  letters whose case no provider guarantees.
 - Money is `numeric(20,6)` in the database. Wei is `bigint`/`string` — **never** a float.
 - Convoy reads the chain; Convoy never writes to it directly. Every write is a KeeperHub call.
 - `gasEstimate` (from simulate) and `gasUsedWei` (from status) are the only gas numbers that may

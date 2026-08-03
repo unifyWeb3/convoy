@@ -1,0 +1,58 @@
+{
+  "probedAt": "2026-08-03T22:28:32.842Z",
+  "baseUrl": "https://app.keeperhub.com",
+  "keyUsed": "kh_AHU…0R0I (35 chars)",
+  "primary": {
+    "label": "DEC-001 target — Base Sepolia",
+    "chain": "84532",
+    "ms": 1872,
+    "httpStatus": 200,
+    "httpStatusText": "OK",
+    "responseHeaders": {
+      "cf-cache-status": "DYNAMIC",
+      "cf-ray": "a258c19428e5d702-CDG",
+      "connection": "keep-alive",
+      "content-encoding": "br",
+      "content-type": "application/json",
+      "date": "Mon, 03 Aug 2026 22:28:35 GMT",
+      "expect-ct": "max-age=86400, enforce",
+      "kh-minimum-cli-version": "0.11.1",
+      "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+      "permissions-policy": "geolocation=(), microphone=(), camera=()",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=XcZD0YABod85xBGpOs7LfZj5FCnurrK9GA1%2FqTMnYG1UG3%2BUS0e%2B3VX%2Fr0JjCzpvOIBdP%2BZdBe1nG9PzVob8VlDVgRmihYXsFQvi0p4Z88mhbvxNe1W%2FCwfYZnccgMUgg0%2BC\"}]}",
+      "server": "cloudflare",
+      "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+      "transfer-encoding": "chunked",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "SAMEORIGIN",
+      "x-ratelimit-limit": "60",
+      "x-ratelimit-remaining": "59",
+      "x-ratelimit-reset": "1785796175",
+      "x-xss-protection": "1; mode=block"
+    },
+    "request": {
+      "chainId": "84532",
+      "network": "84532",
+      "contractAddress": "0x4200000000000000000000000000000000000006",
+      "functionName": "deposit",
+      "functionArgs": "[]",
+      "abi": "[{\"name\":\"deposit\",\"type\":\"function\",\"stateMutability\":\"payable\",\"inputs\":[],\"outputs\":[]}]",
+      "value": "0",
+      "simulate": true,
+      "_authorization": "Bearer kh_AHU…0R0I (35 chars)"
+    },
+    "responseBody": {
+      "success": true,
+      "status": "simulated",
+      "from": "0x65f5afd3b4d5f7d58c408300569a11f0ec190da6",
+      "to": "0x4200000000000000000000000000000000000006",
+      "value": "0",
+      "gasEstimate": "25989",
+      "simulatedReturnValue": null,
+      "wouldRevert": false
+    }
+  },
+  "controlRationale": "Primary returned a simulate-shaped response (200 or 400-with-wouldRevert). No control run needed — only one call made, as asked."
+}

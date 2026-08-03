@@ -14,7 +14,7 @@ cd packages/contracts && forge fmt --check && forge build && forge test && cd -
 `docs/IMPLEMENTATION_STATUS.md` shows the release milestone as the highest unfinished one, and
 `docs/KNOWN_GAPS.md` contains no OPEN gap that blocks it.
 
-## 1. Contracts — testnet first (Base Sepolia 84532)
+## 1. Contracts — Base Sepolia 84532 (the target chain, DEC-001)
 
 ```bash
 cd packages/contracts
@@ -22,9 +22,17 @@ forge script script/Deploy.s.sol --rpc-url base-sepolia --broadcast --verify --c
 ```
 
 Record the addresses. Run `scripts/first-tx.ts` against Sepolia to prove the whole KeeperHub write
-path before touching mainnet.
+path. **This is the release, not a rehearsal for one** — DEC-001 makes 84532 the chain for
+development, rehearsal and the demo.
 
-## 2. Contracts — mainnet (Base 8453)
+## 2. Contracts — Base mainnet 8453 (OPTIONAL, CVY-019 flip only)
+
+**Skip this section by default.** DEC-001 retains mainnet as an optional final demo target; a Base
+Sepolia transaction executed via KeeperHub already satisfies the submission requirement. Attempt it
+only with every P0 milestone green and ≥4h of slack, per `.convoy/tasks/CVY-019.md`.
+
+Requires `BASE_MAINNET_RPC_URL`, which is unset by default precisely so a stray `--rpc-url base`
+cannot resolve.
 
 ```bash
 cd packages/contracts

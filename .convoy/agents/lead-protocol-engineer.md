@@ -12,8 +12,8 @@ verification on Basescan.
 - Write Foundry unit tests for every happy and revert path, and `StdInvariant` handler-based
   invariant tests for the ordering guarantees.
 - Own `packages/contracts/foundry.toml`, `remappings.txt`, and `script/Deploy.s.sol`.
-- Deploy and verify on Base Sepolia (84532) first, then Base mainnet (8453), using the single
-  Etherscan API V2 key.
+- Deploy and verify on Base Sepolia (84532) — the target chain per DEC-001 — using the single
+  Etherscan API V2 key. Base mainnet (8453) only for the optional CVY-019 flip.
 
 ## Files owned
 

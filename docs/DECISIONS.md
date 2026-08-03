@@ -178,8 +178,17 @@ hazard):** `packages/contracts/foundry.toml` mapped `[rpc_endpoints] base = "${B
 both 8453 and 84532, so the accident guard does not catch it. The endpoint is remapped to
 `${BASE_MAINNET_RPC_URL}`, a new optional variable. `base_sepolia` is unchanged.
 
-**Unverified premise, proven at CVY-003/CVY-004:** this amendment assumes KeeperHub direct execution
-works on 84532. `docs/PRODUCT_DISCOVERY.md` §Key Findings supports it — Base Sepolia is in the
-supported 12-chain list, and the 8453-only restriction applies to _agentic-wallet signing_, which is
-gap G-17, not to direct execution. It cannot be verified offline. If it turns out false, DEC-001
-must be revisited rather than worked around.
+**Premise VERIFIED 2026-08-03 against the live API.** This amendment assumed KeeperHub direct
+execution works on 84532 — inferred from `docs/PRODUCT_DISCOVERY.md` §Key Findings, where Base
+Sepolia is in the supported chain list and the 8453-only restriction applies to _agentic-wallet
+signing_ (gap G-17), not to direct execution. That assumption is now **proven rather than inferred**:
+one `simulate:true` call to `POST /api/execute/contract-call` with `chainId:"84532"` /
+`network:"84532"` returned **HTTP 200** with
+`{"success":true,"status":"simulated","wouldRevert":false,"gasEstimate":"25989"}` and a real `from`
+address — so the org Turnkey wallet is provisioned for 84532 and does not return `422`. No control
+run against 8453 was required. The redacted request and response are recorded verbatim at
+`packages/kh-client/test/vcr/dec-001.simulate.84532.probe.json`.
+
+The probe passed an explicit `abi` and targeted the WETH9 predeploy
+`0x4200000000000000000000000000000000000006` deliberately, so a failure could not have been
+misattributed: an unresolved ABI or a missing contract would otherwise read as a rejected network.

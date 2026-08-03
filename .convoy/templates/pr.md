@@ -53,7 +53,7 @@ $ cd packages/contracts && forge fmt --check && forge build && forge test   # if
 - [ ] No private key referenced outside `packages/contracts/script`.
 - [ ] No staged failure, injected fault, or fabricated hash.
 - [ ] Every state transition transactional, emitting exactly one `events` row.
-- [ ] Chain pinned to Base 8453; no `eth_getLogs` on a public RPC.
+- [ ] Chain pinned to Base Sepolia 84532 (DEC-001); no `eth_getLogs` on a public RPC.
 - [ ] Architecture unchanged; friction recorded in `docs/KNOWN_GAPS.md` rather than redesigned.
 - [ ] No kill-list item resurrected.
 

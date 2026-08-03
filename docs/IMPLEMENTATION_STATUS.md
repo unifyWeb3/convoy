@@ -1,6 +1,11 @@
 # Convoy Implementation Status (updated 2026-08-03)
 
-Overall: **15% (CVY-000, CVY-001, CVY-002 done)** Next milestone: **CVY-003 — Deploy+verify on Base Sepolia; FIRST REAL BASE TX**
+Overall: **15% (CVY-000, CVY-001, CVY-002 done; DEC-001 applied)** Next milestone: **CVY-004 — kh-client (KeeperHub REST direct execution)**
+
+**CVY-003 is unfinished but is not next.** Its own card requires "a minimal write path from CVY-004",
+and CVY-004's card names CVY-003 among the things it blocks. The dependency order is
+**002 → 004 → 003**, so CVY-004 is the highest _implementable_ milestone. Nothing is deployed and no
+transaction hash is claimed.
 
 **Execution chain: Base Sepolia (84532)** per DEC-001. Base mainnet (8453) is an optional final demo
 target at CVY-019, not the development target.
@@ -10,8 +15,9 @@ target at CVY-019, not the development target.
 | CVY-000   | Repo bootstrap + toolchain                                  | DONE        | 100 | Monorepo builds empty; `.convoy/` populated; CI grep-guards live          |
 | CVY-001   | Contracts + Foundry unit/invariant tests                    | DONE        | 100 | 45 tests green; invariants at runs=1000 depth=32; gap G-10 recorded       |
 | CVY-002   | payloadHash parity (Sol↔TS) + deploy script                 | DONE        | 100 | 13 dumped fixtures, 47 parity assertions; deploy script written, not run  |
-| CVY-003   | Deploy+verify on Base Sepolia; **FIRST REAL BASE TX**       | TODO        | 0   | **next** — BLOCKED on operator credentials; Day-2 deadline already passed |
-| CVY-004   | kh-client: write + simulate + status + errors + idempotency | TODO        | 0   | Highest external risk (G-01/G-02/G-03)                                    |
+| DEC-001   | _Amendment_ — execution chain → Base Sepolia 84532          | DONE        | 100 | Not a milestone; a scoped spec amendment. See docs/DECISIONS.md           |
+| CVY-004   | kh-client: write + simulate + status + errors + idempotency | TODO        | 0   | **next** — highest external risk (G-01/G-02/G-03); blocks CVY-003         |
+| CVY-003   | Deploy+verify on Base Sepolia; **FIRST REAL BASE TX**       | TODO        | 0   | Gated on CVY-004's write path. Credentials now present; Day-2 date passed |
 | CVY-005   | DB package: Prisma schema, migrations, seed                 | TODO        | 0   |                                                                           |
 | CVY-006   | BullMQ queue + worker + idempotent handlers                 | TODO        | 0   |                                                                           |
 | CVY-007   | Budget meter + gas→USDC accounting                          | TODO        | 0   |                                                                           |
@@ -34,10 +40,13 @@ target at CVY-019, not the development target.
 
 ## Critical path
 
-`002 → 003 → (004) → 008 → GATE1 → 012 → GATE2 → 015 → 019`
+`002 → 004 → 003 → 008 → GATE1 → 012 → GATE2 → 015 → 019`
 
-The first real Base transaction (CVY-003) is front-loaded to Day 2 so the hackathon submission
-requirement is provisionally met before any feature work.
+The first real Base transaction (CVY-003) is front-loaded so the hackathon submission requirement is
+provisionally met before any feature work — but it cannot precede CVY-004, because the transaction is
+landed _through the kh-client_. The blueprint wrote this path as `002 → 003 → (004)` with CVY-004
+parenthesised as "minimal write path"; the ordering above states the dependency the two task cards
+actually declare.
 
 ### Schedule slip (recorded 2026-08-03, updated 2026-08-03 at CVY-002 close, not re-baselined)
 
@@ -46,13 +55,15 @@ The roadmap's calendar days and the elapsed calendar have diverged. CVY-001 (**D
 (CVY-003) has passed unmet. Nothing has been re-baselined — the roadmap day labels are left as
 frozen, and the submission deadline (Aug 13 2026 12:00 UTC+2, 10 days out) is unchanged.
 
-**CVY-003 is now the only thing standing between the repository and a satisfied submission
-requirement, and it is blocked entirely on operator input.** Every offline prerequisite is done: both
-contracts are implemented and tested, the deploy script is written and its chain guard verified, and
-the payload commitment is proven byte-identical across Solidity and TypeScript. The next session
-cannot start until `KEEPERHUB_API_KEY`, `BASE_RPC_URL`, `ETHERSCAN_API_KEY` and
-`DEPLOYER_PRIVATE_KEY` exist. **This is the decision that belongs to the operator, and it is now
-urgent rather than merely pending.**
+**CVY-003 is still the only thing standing between the repository and a satisfied submission
+requirement.** Every offline prerequisite is done: both contracts are implemented and tested, the
+deploy script is written and its chain guard verified, and the payload commitment is proven
+byte-identical across Solidity and TypeScript.
+
+**Updated 2026-08-03: the credential block is cleared.** `KEEPERHUB_API_KEY`, `BASE_RPC_URL`,
+`BASE_SEPOLIA_RPC_URL`, `BASE_RPC_URL_FALLBACK`, `ETHERSCAN_API_KEY` and `DEPLOYER_PRIVATE_KEY` are
+all present. CVY-003 is now gated on **CVY-004's write path**, which is engineering work rather than
+operator input. `OPENAI_API_KEY` is still a placeholder, so CVY-010/011 remain blocked.
 
 ### Buffer exhausted, cut order live (recorded 2026-08-03 at DEC-001)
 
@@ -79,18 +90,21 @@ which is the one schedule pressure it was able to relieve.
 
 **Never cut:** the SSE timeline, the Critic veto, or crash-resume.
 
-## Blocked on operator input
+## Operator input
 
-CVY-003 cannot land until these exist. All apply to **Base Sepolia (84532)** per DEC-001:
+All values apply to **Base Sepolia (84532)** per DEC-001.
 
-| Value                   | Chain         | Notes                                                 |
-| ----------------------- | ------------- | ----------------------------------------------------- |
-| `KEEPERHUB_API_KEY`     | 84532         | org `kh_` key with the Turnkey wallet configured      |
-| `BASE_RPC_URL`          | 84532         | dedicated Sepolia RPC — never a public one            |
-| `BASE_SEPOLIA_RPC_URL`  | 84532         | Foundry `--rpc-url base_sepolia`; may be the same URL |
-| `ETHERSCAN_API_KEY`     | 84532 (+8453) | single Etherscan **V2** key; covers both chains       |
-| `DEPLOYER_PRIVATE_KEY`  | 84532         | Foundry deploy only; fund from a Sepolia faucet       |
-| `BASE_RPC_URL_FALLBACK` | 84532         | demo backup path b; must match the primary chain      |
-| `BASE_MAINNET_RPC_URL`  | 8453          | **optional**, CVY-019 flip only — leave unset         |
+| Value                   | Chain         | Status      | Notes                                                 |
+| ----------------------- | ------------- | ----------- | ----------------------------------------------------- |
+| `KEEPERHUB_API_KEY`     | 84532         | PRESENT     | org `kh_` key with the Turnkey wallet configured      |
+| `BASE_RPC_URL`          | 84532         | PRESENT     | dedicated Sepolia RPC — never a public one            |
+| `BASE_SEPOLIA_RPC_URL`  | 84532         | PRESENT     | Foundry `--rpc-url base_sepolia`; may be the same URL |
+| `BASE_RPC_URL_FALLBACK` | 84532         | PRESENT     | demo backup path b; must match the primary chain      |
+| `ETHERSCAN_API_KEY`     | 84532 (+8453) | PRESENT     | single Etherscan **V2** key; covers both chains       |
+| `DEPLOYER_PRIVATE_KEY`  | 84532         | PRESENT     | Foundry deploy only; fund from a Sepolia faucet       |
+| `OPENAI_API_KEY`        | —             | PLACEHOLDER | **still blocking CVY-010 / CVY-011**                  |
+| `BASE_MAINNET_RPC_URL`  | 8453          | UNSET       | **optional**, CVY-019 flip only — leave unset         |
 
-The org Turnkey wallet also needs Base Sepolia ETH. CVY-010/011 additionally need `OPENAI_API_KEY`.
+Presence is not the same as sufficiency: the org Turnkey wallet must also be **configured for 84532**
+and funded with Base Sepolia ETH. A `422 wallet-not-configured` from KeeperHub means that
+provisioning is missing, and it is fatal-to-run rather than a client bug.

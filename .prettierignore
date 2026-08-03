@@ -15,6 +15,11 @@ packages/db/src/generated/
 # tree and the "fixtures are dumped, not hand-written" guarantee gets muddy.
 tests/fixtures/payloadHash.fixtures.json
 
+# VCR tapes: verbatim recordings of real KeeperHub responses. Reformatting one
+# would make it a transcription rather than a recording, and the whole point is
+# that the bytes came off the wire. Same reasoning as the payloadHash fixtures.
+packages/kh-client/test/vcr/
+
 docs/ARCHITECTURE.md
 docs/IMPLEMENTATION_BLUEPRINT.md
 docs/PRODUCT_DISCOVERY.md

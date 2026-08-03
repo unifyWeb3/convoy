@@ -33,8 +33,8 @@ of CVY-002 the payloadHash-parity row is green too — 47 assertions over 13 dum
 
 Toggled by `CONVOY_KH_MODE`:
 
-- **`live`** — Base Sepolia (84532) against the real KeeperHub API. Used for rehearsal and smoke
-  tests before any mainnet run.
+- **`live`** — Base Sepolia (84532) against the real KeeperHub API. This is the target chain per
+  DEC-001, not a rehearsal for a mainnet run.
 - **`vcr`** — recorded fixture tapes replayed offline. Keeps UI development unblocked when
   KeeperHub is unavailable or credentials are absent.
 

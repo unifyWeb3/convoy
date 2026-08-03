@@ -7,7 +7,8 @@ The first block is the frozen excerpt from the Implementation Blueprint §3. It 
 - All KeeperHub access goes through packages/kh-client. No raw fetch to app.keeperhub.com elsewhere.
 - State transitions are transactional (prisma.$transaction) and emit exactly one events row.
 - Idempotent handlers keyed (runId, itemIdx, phase): reconcile-before-act; safe to re-run.
-- viem chain pinned to base (8453) via a dedicated RPC. Never eth_getLogs on a public RPC.
+- viem chain pinned to baseSepolia (84532, DEC-001) via a dedicated RPC. Never eth_getLogs on a
+  public RPC.
 - Money: numeric(20,6) in DB; bigint/string for wei; never float wei.
 - Solidity 0.8.24, custom errors (no require strings), operator-bound access control.
 - Conventional commits: feat/fix/test/docs/chore(scope): subject. One milestone per PR.
