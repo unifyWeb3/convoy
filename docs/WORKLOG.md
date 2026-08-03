@@ -74,7 +74,12 @@ frozen §8 source has none — architecture wins, the helper lands in CVY-002's 
 G-13 records that `fail_on_revert = false` makes green invariants meaningless without coverage
 evidence: uniform actor selection was measured landing `accepted open/commit/seal: 4 0 0` over 32
 calls, so the handler now biases towards the run's operator (4 5 1 accepted after the fix) and
-prints accepted/rejected counters. Decisions D-009 (mock ships without events or access control) and
-D-010 (handler bias + coverage counters) recorded. No KeeperHub proof: this milestone touches no
+prints accepted/rejected counters. G-14 records that a ghost variable assigned from the contract
+under test mirrors it and makes its invariant tautological: `ghostLastSeq` is now incremented by the
+handler and the counting invariants were mutation-tested — changing the contract's
+`committedCount += 1` to `+= 2` fails both `invariant_idxMonotonic` and
+`invariant_committedCountMatches` on the first accepted commit. Decisions D-009 (mock ships without
+events or access control), D-010 (handler bias + coverage counters) and D-011 (independently derived
+ghosts + mutation test) recorded. No KeeperHub proof: this milestone touches no
 KeeperHub surface and deploys nothing. The roadmap's "hard Day-2 deadline" for CVY-003 has passed
 unmet — the slip is recorded in IMPLEMENTATION_STATUS.md and is not re-baselined here.

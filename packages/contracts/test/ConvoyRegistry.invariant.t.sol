@@ -117,9 +117,12 @@ contract ConvoyRegistryHandler is CommonBase, StdCheats, StdUtils {
             ghostPayload[runId][idx] = payload;
             ghostCommits[runId] += 1;
 
-            uint32 seq = _committedCount(runId);
-            if (seq != ghostLastSeq[runId] + 1) seqViolated = true;
-            ghostLastSeq[runId] = seq;
+            // Derived independently of the registry — incremented here, never assigned from a
+            // registry read — so `ghostLastSeq` is a real expectation the registry can contradict
+            // rather than a mirror of itself. Verified by mutation: changing the contract's
+            // `committedCount += 1` to `+= 2` fails this on the first accepted commit.
+            ghostLastSeq[runId] += 1;
+            if (_committedCount(runId) != ghostLastSeq[runId]) seqViolated = true;
 
             okCommit++;
         } catch {

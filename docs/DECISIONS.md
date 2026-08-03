@@ -91,3 +91,14 @@ stays reachable, counts accepted and rejected calls per function, and prints the
 _calls accepted_, because the latter is not guaranteed by the fuzzer and a flaky CI check is worse
 than no check; reachability is guaranteed instead by the deterministic
 `test_handler_reachesEveryState`.
+
+**D-011 2026-08-03: ghost counters are derived by the handler, never assigned from a registry read,
+and the counting invariants are mutation-tested.**
+A ghost variable assigned from the contract it is supposed to check can degenerate into a mirror of
+that contract, and the invariant comparing them becomes a tautology that passes on a broken
+contract. `ghostLastSeq` is therefore incremented by the handler (`+= 1`) and compared against
+`committedCount`, rather than assigned from it. The property is verified the only way that means
+anything: mutating `committedCount += 1` to `+= 2` in the contract must turn the invariants red. It
+does — both `invariant_idxMonotonic` and `invariant_committedCountMatches` fail on the first
+accepted commit. Re-run that mutation whenever the handler's ghost state is refactored; a green
+invariant that cannot fail is worse than no invariant, because it is trusted.

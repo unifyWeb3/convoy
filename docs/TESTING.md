@@ -55,6 +55,16 @@ having exercised almost nothing (gap G-13). `ConvoyRegistryHandler` therefore:
 `seq`), not of `idx`: the frozen contract accepts any non-duplicate `idx` and enforces ordering
 through the counter. The name is the blueprint's and was kept.
 
+**Falsifiability.** The two counting invariants were mutation-tested: changing the contract's
+`committedCount += 1` to `+= 2` fails both `invariant_idxMonotonic` and
+`invariant_committedCountMatches` on the first accepted commit. Their ghost counters are derived by
+the handler itself, never assigned from a registry read, so they are expectations the registry can
+contradict rather than mirrors of it. `invariant_noCommitBeforeOpen` is the weakest of the five in a
+fuzz campaign — all four runs get opened within the first few calls, so its pre-open branch goes
+dead and it mainly guards that an opened run never returns to `None`. The pre-open property is
+pinned directly by `test_commitAction_revertsNotOpen`. Re-run the mutation whenever the handler's
+ghost state is refactored.
+
 ## Running everything
 
 ```bash
