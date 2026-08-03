@@ -141,3 +141,45 @@ exclusion was checked the same way the invariants were: planting
 `const k = process.env.PRIVATE_KEY;` in `services/worker/src/` makes guard 3 report the file, and
 removing it makes the guard clean again. The exclusion skips generated output and nothing else.
 **Re-run that probe whenever a guard's scope changes.**
+
+---
+
+## Spec amendments
+
+A `DEC-NNN` entry is a **scoped amendment to a frozen document's parameters**, not an implementation
+choice. It carries the same weight as the frozen documents for the parameter it names, and it is the
+only mechanism by which such a parameter changes. Where a frozen document and a `DEC-NNN` entry
+conflict, the amendment wins **for that parameter only** and the frozen text is superseded, not
+edited.
+
+**DEC-001 2026-08-03: the execution chain for development, rehearsal, and the demo is Base Sepolia
+(84532), not Base mainnet (8453).**
+
+- Base Sepolia keeps ~2s block times, which the 3-minute demo's serialized-nonce execution beat
+  depends on. Ethereum Sepolia's ~12s blocks were considered and rejected for this reason.
+- Testnet gas removes funding risk from the critical path.
+- Basescan verification, RPC provider, and tooling stay in the same family as Base mainnet, so a
+  late flip of the final demo run to 8453 remains cheap.
+
+Base mainnet (8453) is retained as an **optional final demo target at CVY-019**, not as the
+development target. Mainnet support is not removed from the code; the chain is parameterised.
+
+**Superseded frozen text — do not "correct" these back.** `docs/IMPLEMENTATION_BLUEPRINT.md` §11
+line 509 describes `BASE_RPC_URL` as "dedicated RPC, chain pinned 8453" and its §11 verification
+matrix (line 534) as `eth_chainId == 0x2105`; `.convoy/agents/principal-blockchain.md` line 50 says
+the same. Those files are frozen or outside this amendment's enumerated scope, so they still read 8453. **This entry supersedes them.** `scripts/verify-env.ts` asserts `0x14a34` (84532) by design,
+and a future session that "fixes" it back to `0x2105` is reintroducing the funding risk this
+amendment removed.
+
+**Consequential change (outside DEC-001's file list, made because the amendment creates the
+hazard):** `packages/contracts/foundry.toml` mapped `[rpc_endpoints] base = "${BASE_RPC_URL}"`. Once
+`BASE_RPC_URL` holds a Sepolia endpoint, `forge script --rpc-url base --broadcast` would deploy to
+**Sepolia while the operator believed it was mainnet** — and `Deploy.s.sol`'s chain allowlist permits
+both 8453 and 84532, so the accident guard does not catch it. The endpoint is remapped to
+`${BASE_MAINNET_RPC_URL}`, a new optional variable. `base_sepolia` is unchanged.
+
+**Unverified premise, proven at CVY-003/CVY-004:** this amendment assumes KeeperHub direct execution
+works on 84532. `docs/PRODUCT_DISCOVERY.md` §Key Findings supports it — Base Sepolia is in the
+supported 12-chain list, and the 8453-only restriction applies to _agentic-wallet signing_, which is
+gap G-17, not to direct execution. It cannot be verified offline. If it turns out false, DEC-001
+must be revisited rather than worked around.

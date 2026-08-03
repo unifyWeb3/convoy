@@ -124,3 +124,51 @@ CVY-000 convention. Decisions D-012…D-015 recorded. Off-card but required: vie
 `fs_permissions` scoped to the fixtures directory in foundry.toml, the generated fixture file added
 to `.prettierignore`. Nothing was deployed and no transaction hash is claimed. **CVY-003 is blocked
 on four operator credentials that still do not exist.**
+
+---
+
+## DEC-001 — 2026-08-03 — Chain target amendment: Base mainnet (8453) → Base Sepolia (84532)
+
+Scope: a spec amendment, not a milestone. No milestone was started or advanced; CVY-003 remains the
+next unfinished milestone and remains blocked on operator credentials.
+
+What changed: the execution chain for development, rehearsal and the demo is now Base Sepolia
+(84532). Base mainnet (8453) is retained as an optional final demo target at CVY-019 — support is
+parameterised, never removed. Rationale as recorded in DECISIONS.md: Base Sepolia keeps the ~2s
+block times the 3-minute demo's serialized-nonce beat depends on (Ethereum Sepolia's ~12s blocks
+were considered and rejected for exactly this reason), testnet gas removes funding risk from the
+critical path, and staying in the Base family keeps a late flip to 8453 cheap.
+
+Files changed: docs/DECISIONS.md (new "Spec amendments" section + DEC-001), docs/KNOWN_GAPS.md
+(G-17, G-18, G-19 + detail), .env.example, packages/contracts/foundry.toml,
+scripts/verify-env.ts, .convoy/tasks/CVY-002.md, .convoy/tasks/CVY-003.md, .convoy/tasks/CVY-004.md,
+.convoy/tasks/CVY-012.md, .convoy/tasks/CVY-019.md, CLAUDE.md, AGENTS.md,
+docs/IMPLEMENTATION_STATUS.md, docs/WORKLOG.md
+
+Verification: pnpm -r build / typecheck / lint clean; pnpm format:check clean; forge build and
+forge test clean (45 passed / 0 failed) with BASE_MAINNET_RPC_URL unset, confirming the remapped
+endpoint resolves lazily; all four CI grep-guards clean; CLAUDE.md and AGENTS.md byte-identical.
+
+Notes: **DEC-001 asked for the two new gaps to be numbered G-07 and G-08, but those IDs have been
+occupied since CVY-000** (workflow-surface conflict; gas-sponsorship conflict) and are referenced
+from DECISIONS.md and the milestone reports. Renumbering would break those references, so the gaps
+were recorded verbatim at the next free IDs — **G-17** (x402 is Base-mainnet-only) and **G-18**
+(budget meter notional on testnet) — cross-referenced to their near-neighbours G-06 and G-04 so
+nobody merges them later.
+
+One change was made outside DEC-001's file list because the amendment itself created the hazard:
+foundry.toml mapped `[rpc_endpoints] base = "${BASE_RPC_URL}"`, so repointing BASE_RPC_URL at
+Sepolia would have made `--rpc-url base --broadcast` deploy to Sepolia while the operator believed
+it was mainnet — and Deploy.s.sol's allowlist permits both chains, so the accident guard would not
+have caught it. `base` now maps to a new optional `BASE_MAINNET_RPC_URL`, unset by default.
+
+G-19 records nine chain references across eight files that DEC-001 did not enumerate and that were
+deliberately not swept — most importantly README.md:8 ("Chain: **Base mainnet (8453)**"), now an
+externally-visible false claim, and .convoy/agents/principal-blockchain.md:50, which instructs a
+future agent to assert `0x2105`. DEC-001 carries an explicit supersession note naming the frozen
+blueprint §11 lines that still say 8453, so verify-env's new 84532 pin is not "corrected" back.
+
+DEC-001 assumes KeeperHub direct execution works on 84532. PRODUCT_DISCOVERY §Key Findings supports
+it — Base Sepolia is in the supported chain list and the 8453-only restriction applies to
+agentic-wallet signing (which is G-17) — but it cannot be verified offline and is proven at
+CVY-003/CVY-004 with a real key. CVY-003's fallback #1 now covers the case where it is false.

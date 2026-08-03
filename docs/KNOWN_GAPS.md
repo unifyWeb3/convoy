@@ -27,6 +27,9 @@ no further action) · `CUT` (feature removed per the cut order) · `CLOSED` (no 
 | G-14 | A ghost variable assigned from the contract under test mirrors it, so the invariant comparing the two passes even on a broken contract                                                                              | a green invariant that cannot fail is worse than none, because it is trusted                                                                                              | Ghost counters are incremented by the handler, never assigned from a registry read; falsifiability proven by a `+= 1` → `+= 2` mutation of `committedCount` (see D-011)                                | MITIGATED |
 | G-15 | Compiling `Deploy.s.sol` emits `packages/contracts/out/Deploy.s.sol/Deploy.json`, which contains the string `PRIVATE_KEY` and tripped the "no private key" grep-guard                                               | CI unaffected (that job checks out a clean tree and `out/` is gitignored), but the guards are meant to be run locally by reviewers, where they went red on a correct repo | Guards 1, 3 and 4 gained `--exclude-dir=out --exclude-dir=dist --exclude-dir=node_modules`; mirrored in `.convoy/checklists/review.md`. The guard's scope is unchanged — only build output is excluded | MITIGATED |
 | G-16 | `packages/kh-client/tsconfig.json` includes only `src/**/*.ts`, so `pnpm -r typecheck` does not typecheck `test/`                                                                                                   | a type error in a test file is caught by vitest and eslint, but not by the typecheck gate                                                                                 | **Accepted, CVY-000 convention.** Not widened at CVY-002 — the parity test compiles under vitest and lints clean. Revisit only if a test-only type error ever escapes                                  | ACCEPTED  |
+| G-17 | **x402 is Base-mainnet-only.** The agentic wallet's Turnkey allowlist covers Base 8453 USDC and Tempo USDC.e. There is no Base Sepolia path for the payment leg                                                     | CVY-017 cannot run on the development chain                                                                                                                               | Cut to a gas-only budget (cut order #1), or run a single sub-dollar x402 payment on Base mainnet independently of execution                                                                            | OPEN      |
+| G-18 | **Budget meter is notional on testnet.** `gasUsedWei` is real; the USD price is frozen and testnet gas has no market value                                                                                          | budget figures are notional                                                                                                                                               | None needed — disclose in the README honesty table as "real gas units, notional USD at a frozen price"                                                                                                 | ACCEPTED  |
+| G-19 | DEC-001 residue: nine chain references across eight files outside the amendment's enumerated file list still say Base mainnet / 8453 / `0x2105`                                                                     | a future session reading them as authoritative could revert the chain target; `README.md:8` is an externally-visible false claim                                          | **Tracked, not swept.** DEC-001 enumerated its files deliberately; DECISIONS.md DEC-001 records the supersession. File list in the detail section below                                                | OPEN      |
 
 ## Detail
 
@@ -119,3 +122,59 @@ changes the `dist/` layout and the package's published entry points.
 and CVY-002 is not the milestone to change a build layout. The parity test is still type-checked in
 practice — vitest compiles it and `eslint src test` lints it, and both are green gates. Revisit only
 if a type error in a test file ever escapes to CI.
+
+### G-17 — x402 is Base-mainnet-only **(OPEN)**
+
+Recorded by DEC-001, which moved the execution chain to Base Sepolia. The agentic wallet's Turnkey
+allowlist covers Base 8453 USDC (`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`) and Tempo USDC.e
+only. There is **no Base Sepolia path** for the payment leg.
+
+**Impact:** CVY-017 cannot run on the development chain. **Fallback:** cut to a gas-only budget (cut
+order #1), or run a single sub-dollar x402 payment on Base mainnet independently of execution — the
+payment leg does not have to share a chain with the execution leg.
+
+Distinct from **G-06**, which is about the `@keeperhub/wallet` API surface being unverified. G-06 is
+"we do not know the signature"; G-17 is "even with the signature, the chain is wrong." They share
+cut order #1 as a fallback and should be resolved together at CVY-017, but they are not the same
+gap and must not be merged.
+
+### G-18 — budget meter is notional on testnet
+
+Recorded by DEC-001. `gasUsedWei` comes from a real KeeperHub status response and is a real gas
+figure. The USD conversion uses `CONVOY_ETH_USD`, frozen per run (G-04) — and on a testnet the gas
+being priced has no market value at all.
+
+**Impact:** budget figures are notional. **Fallback:** none needed. **This must be disclosed**: the
+README honesty table states "real gas units, notional USD at a frozen price." The gas units are the
+honest part and the claim is scoped to them.
+
+Distinct from **G-04**, which is about _not using a live oracle_. G-04 makes the price frozen and
+reproducible; G-18 says that on 84532 even a perfect price would be pricing something worthless.
+G-04 is a design choice, G-18 is a consequence of DEC-001.
+
+### G-19 — DEC-001 residue: unswept chain references **(OPEN)**
+
+DEC-001 enumerated the files it changed. Nine references to the old chain target, across eight
+files, live outside that list and were **deliberately not swept**, because item 5 named `.convoy/`
+files individually, which makes the omissions read as intentional rather than overlooked:
+
+| Reference                                     | Text                                             |
+| --------------------------------------------- | ------------------------------------------------ |
+| `README.md:8`                                 | "Chain: **Base mainnet (8453)**"                 |
+| `docs/AI_WORKFLOW.md:34`                      | "Keep the chain pinned to Base 8453."            |
+| `docs/DEPLOYMENT.md:68`                       | env-surface row still lists the old variable set |
+| `.convoy/instructions/coding-standards.md:10` | "viem chain pinned to base (8453)"               |
+| `.convoy/agents/principal-blockchain.md:30`   | "the chain is pinned to Base **8453**"           |
+| `.convoy/agents/principal-blockchain.md:50`   | "`eth_chainId` must equal `0x2105` (8453)"       |
+| `.convoy/checklists/milestone-done.md:38`     | "The chain stays pinned to Base 8453"            |
+| `.convoy/templates/pr.md:56`                  | "Chain pinned to Base 8453"                      |
+| `.convoy/playbooks/demo.md:41`                | "(8453 unconditionally)"                         |
+
+**`README.md:8` is the one that matters most** — it is the only externally-visible claim in the list,
+and it is now false.
+
+`.convoy/agents/principal-blockchain.md:50` is the most dangerous for a future session: it instructs
+an agent to assert `0x2105`, which is exactly what `scripts/verify-env.ts` no longer does. DEC-001's
+supersession note in `docs/DECISIONS.md` is what stops that from being "fixed" back. Resolve this gap
+by either sweeping all nine references or explicitly deciding they stay; do not leave it open past
+CVY-003.

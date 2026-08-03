@@ -31,8 +31,14 @@ line_length = 100
 tab_width = 4
 bracket_spacing = true
 
+# DEC-001: the primary chain is Base Sepolia (84532), so BASE_RPC_URL now holds a
+# Sepolia endpoint. `base` must therefore NOT map to it — otherwise
+# `--rpc-url base --broadcast` would deploy to Sepolia while the operator
+# believed it was mainnet, and Deploy.s.sol's allowlist permits both chains so
+# the guard would not catch it. `base` maps to its own optional variable, unset
+# until the optional CVY-019 flip.
 [rpc_endpoints]
-base = "${BASE_RPC_URL}"
+base = "${BASE_MAINNET_RPC_URL}"
 base_sepolia = "${BASE_SEPOLIA_RPC_URL}"
 
 # Basescan verification uses the single Etherscan API V2 key; legacy per-chain

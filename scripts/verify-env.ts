@@ -27,6 +27,17 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 type Status = 'PASS' | 'FAIL';
 
+/**
+ * The configured execution chain. DEC-001 moved development, rehearsal and the
+ * demo from Base mainnet (8453) to Base Sepolia (84532); Base mainnet is an
+ * optional final demo target at CVY-019 only.
+ *
+ * Declared once so the id, the label and the RPC comparison cannot drift apart.
+ * `docs/IMPLEMENTATION_BLUEPRINT.md` §11 still says `eth_chainId == 0x2105`;
+ * that text is superseded by DEC-001 — do not "fix" this back to mainnet.
+ */
+const TARGET_CHAIN = { id: 84_532, name: 'Base Sepolia' } as const;
+
 interface Result {
   check: string;
   status: Status;
@@ -291,30 +302,31 @@ async function checkKeeperHubWallet(): Promise<Result> {
 }
 
 async function checkBaseRpc(): Promise<Result> {
+  const check = `RPC pinned ${TARGET_CHAIN.id}`;
   const url = env('BASE_RPC_URL');
   if (url === undefined) {
     return {
-      check: 'Base RPC pinned 8453',
+      check,
       status: 'FAIL',
-      detail: 'BASE_RPC_URL not set (dedicated RPC required — never a public one)',
+      detail: `BASE_RPC_URL not set (dedicated ${TARGET_CHAIN.name} RPC required — never a public one)`,
       expectedFrom: 'CVY-003',
     };
   }
   try {
     const chainId = await rpcCall(url, 'eth_chainId', []);
-    const ok = chainId === '0x2105';
+    // Compared numerically, not as a string: `eth_chainId` is hex and 0x14a34
+    // contains letters, whose case no provider guarantees.
+    const reported = Number(chainId);
+    const ok = reported === TARGET_CHAIN.id;
     return {
-      check: 'Base RPC pinned 8453',
+      check,
       status: ok ? 'PASS' : 'FAIL',
-      detail: ok ? 'eth_chainId == 0x2105' : `eth_chainId == ${String(chainId)}, expected 0x2105`,
+      detail: ok
+        ? `eth_chainId == ${String(chainId)} (${TARGET_CHAIN.name})`
+        : `eth_chainId == ${String(chainId)} (${Number.isNaN(reported) ? 'unparseable' : reported}), expected ${TARGET_CHAIN.id}`,
     };
   } catch (e) {
-    return {
-      check: 'Base RPC pinned 8453',
-      status: 'FAIL',
-      detail: (e as Error).message,
-      expectedFrom: 'CVY-003',
-    };
+    return { check, status: 'FAIL', detail: (e as Error).message, expectedFrom: 'CVY-003' };
   }
 }
 

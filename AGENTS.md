@@ -29,7 +29,7 @@ Ablation: pnpm tsx scripts/ablation.ts --ablate-planner|--ablate-critic
 
 ## KeeperHub facts (verified — do not invent capabilities)
 - POST https://app.keeperhub.com/api/execute/contract-call ; Authorization: Bearer kh_...
-  Body: { chainId:"8453", network:"8453", contractAddress, functionName,
+  Body: { chainId:"84532", network:"84532", contractAddress, functionName,
           functionArgs:"[...]"(JSON-array string), abi?, value?, gasLimitMultiplier?, simulate? }
 - Writes execute SYNCHRONOUSLY → 202 { executionId:"direct_...", status:"completed"|"failed" }.
 - simulate:true (strict boolean) → 200 {wouldRevert:false,gasEstimate,...} or 400 {wouldRevert:true,revertReason:"Error(...)"}.
@@ -37,7 +37,10 @@ Ablation: pnpm tsx scripts/ablation.ts --ablate-planner|--ablate-critic
 - Idempotency-Key: <runId>:<idx>:<attempt> (per-org, 24h; simulate exempt).
 - Errors: 401 fatal, 403 daily-cap fatal-to-run, 422 wallet-not-configured fatal-to-run, 429 backoff+Retry-After.
   Coded run errors E-000x/N-000x/P-000x/C-0001-2 transient (retry observed). config-revert (full msg, no code) = item FAILED, no retry.
-- Base=8453, Base Sepolia=84532. USDC Base=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913.
+- PRIMARY CHAIN = Base Sepolia 84532 (DEC-001: dev, rehearsal, demo). Base mainnet 8453 is an
+  OPTIONAL final demo target at CVY-019 only — parameterised, never removed. BASE_RPC_URL holds a
+  Sepolia endpoint; verify-env pins 0x14a34. x402 has no Sepolia path (G-17); testnet USD is
+  notional (G-18). USDC Base mainnet=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913.
 - call_workflow returns UNSIGNED calldata for cross-org writes — Convoy does NOT use it. Direct-exec only.
 - Convoy uses REST vocabulary (contractAddress/functionName/functionArgs/abi). NEVER abiFunction.
 
