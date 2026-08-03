@@ -29,7 +29,7 @@ no further action) · `CUT` (feature removed per the cut order) · `CLOSED` (no 
 | G-16 | `packages/kh-client/tsconfig.json` includes only `src/**/*.ts`, so `pnpm -r typecheck` does not typecheck `test/`                                                                                                   | a type error in a test file is caught by vitest and eslint, but not by the typecheck gate                                                                                 | **Accepted, CVY-000 convention.** Not widened at CVY-002 — the parity test compiles under vitest and lints clean. Revisit only if a test-only type error ever escapes                                  | ACCEPTED  |
 | G-17 | **x402 is Base-mainnet-only.** The agentic wallet's Turnkey allowlist covers Base 8453 USDC and Tempo USDC.e. There is no Base Sepolia path for the payment leg                                                     | CVY-017 cannot run on the development chain                                                                                                                               | Cut to a gas-only budget (cut order #1), or run a single sub-dollar x402 payment on Base mainnet independently of execution                                                                            | OPEN      |
 | G-18 | **Budget meter is notional on testnet.** `gasUsedWei` is real; the USD price is frozen and testnet gas has no market value                                                                                          | budget figures are notional                                                                                                                                               | None needed — disclose in the README honesty table as "real gas units, notional USD at a frozen price"                                                                                                 | ACCEPTED  |
-| G-19 | DEC-001 residue: nine chain references across eight files outside the amendment's enumerated file list still say Base mainnet / 8453 / `0x2105`                                                                     | a future session reading them as authoritative could revert the chain target; `README.md:8` is an externally-visible false claim                                          | **Tracked, not swept.** DEC-001 enumerated its files deliberately; DECISIONS.md DEC-001 records the supersession. File list in the detail section below                                                | OPEN      |
+| G-19 | DEC-001 residue: chain references outside the amendment's enumerated file list still say Base mainnet / 8453 / `0x2105`                                                                                             | `.convoy/playbooks/release.md` is the authoritative operational sequence and its step 2 deploys to mainnet — a session following it literally does the wrong-chain deploy | **Tracked, not swept.** DEC-001 enumerated its files deliberately; DECISIONS.md DEC-001 records the supersession. Regeneration command + triaged list in the detail section below                      | OPEN      |
 
 ## Detail
 
@@ -154,27 +154,38 @@ G-04 is a design choice, G-18 is a consequence of DEC-001.
 
 ### G-19 — DEC-001 residue: unswept chain references **(OPEN)**
 
-DEC-001 enumerated the files it changed. Nine references to the old chain target, across eight
-files, live outside that list and were **deliberately not swept**, because item 5 named `.convoy/`
-files individually, which makes the omissions read as intentional rather than overlooked:
+DEC-001 enumerated the files it changed. References to the old chain target live outside that list
+and were **deliberately not swept** — item 5 named `.convoy/` files individually, which makes the
+omissions read as intentional rather than overlooked.
 
-| Reference                                     | Text                                             |
-| --------------------------------------------- | ------------------------------------------------ |
-| `README.md:8`                                 | "Chain: **Base mainnet (8453)**"                 |
-| `docs/AI_WORKFLOW.md:34`                      | "Keep the chain pinned to Base 8453."            |
-| `docs/DEPLOYMENT.md:68`                       | env-surface row still lists the old variable set |
-| `.convoy/instructions/coding-standards.md:10` | "viem chain pinned to base (8453)"               |
-| `.convoy/agents/principal-blockchain.md:30`   | "the chain is pinned to Base **8453**"           |
-| `.convoy/agents/principal-blockchain.md:50`   | "`eth_chainId` must equal `0x2105` (8453)"       |
-| `.convoy/checklists/milestone-done.md:38`     | "The chain stays pinned to Base 8453"            |
-| `.convoy/templates/pr.md:56`                  | "Chain pinned to Base 8453"                      |
-| `.convoy/playbooks/demo.md:41`                | "(8453 unconditionally)"                         |
+**This list is not exhaustive and is not hand-maintained.** Regenerate it; a hand-counted register
+entry is exactly the kind of claim that quietly goes stale:
 
-**`README.md:8` is the one that matters most** — it is the only externally-visible claim in the list,
-and it is now false.
+```bash
+grep -rn "8453\|0x2105\|Base mainnet" --include='*.md' README.md docs .convoy \
+  | grep -vE "ARCHITECTURE|PRODUCT_DISCOVERY|IMPLEMENTATION_BLUEPRINT|docs/milestones/|DECISIONS|KNOWN_GAPS|WORKLOG"
+```
 
-`.convoy/agents/principal-blockchain.md:50` is the most dangerous for a future session: it instructs
-an agent to assert `0x2105`, which is exactly what `scripts/verify-env.ts` no longer does. DEC-001's
-supersession note in `docs/DECISIONS.md` is what stops that from being "fixed" back. Resolve this gap
-by either sweeping all nine references or explicitly deciding they stay; do not leave it open past
-CVY-003.
+Not every hit is stale — DEC-001 keeps 8453 as the optional CVY-019 target, so the mainnet steps in
+`CVY-019`, `CVY-003`'s fallback, and `DEPLOYMENT.md`'s mainnet rows are **correct**. Triage the
+output; the ones below are the ones that contradict DEC-001, worst first:
+
+| Reference                                     | Why it is dangerous                                                                                                                                                                                                                              |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `.convoy/playbooks/release.md:17,25,27`       | **Worst.** `DEPLOYMENT.md:3` names this the authoritative operational sequence, and its step 2 is "Contracts — mainnet (Base 8453)". A session following it literally performs the wrong-chain deploy the `foundry.toml` remap exists to prevent |
+| `.convoy/agents/principal-blockchain.md:50`   | Instructs an agent to assert `eth_chainId == 0x2105`, which is exactly what `verify-env.ts` no longer does                                                                                                                                       |
+| `.convoy/agents/principal-blockchain.md:30`   | "the chain is pinned to Base **8453**"                                                                                                                                                                                                           |
+| `.convoy/agents/lead-protocol-engineer.md:15` | "Base Sepolia first, then Base mainnet" — describes the superseded sequence as the plan of record                                                                                                                                                |
+| `README.md:8`                                 | "Chain: **Base mainnet (8453)**" — the only externally-visible false claim; artifact rows 41–43 likewise                                                                                                                                         |
+| `docs/AI_WORKFLOW.md:34`                      | "Keep the chain pinned to Base 8453."                                                                                                                                                                                                            |
+| `.convoy/instructions/coding-standards.md:10` | "viem chain pinned to base (8453)"                                                                                                                                                                                                               |
+| `.convoy/checklists/milestone-done.md:38`     | "The chain stays pinned to Base 8453"                                                                                                                                                                                                            |
+| `.convoy/templates/pr.md:56`                  | "Chain pinned to Base 8453"                                                                                                                                                                                                                      |
+| `.convoy/playbooks/demo.md:41`                | "(8453 unconditionally)"                                                                                                                                                                                                                         |
+| `docs/DEPLOYMENT.md:13,21,68`                 | stage table framed as testnet-then-mainnet; env-surface row omits `BASE_MAINNET_RPC_URL`                                                                                                                                                         |
+| `docs/TESTING.md:36`                          | `live` mode described as rehearsal "before any mainnet run"                                                                                                                                                                                      |
+
+`release.md` and `principal-blockchain.md:50` are the two that cause an **action**, not just a stale
+sentence, and they are what DEC-001's supersession note in `docs/DECISIONS.md` is holding the line
+against. Resolve this gap by either sweeping the list or explicitly deciding it stays; **do not leave
+it open past CVY-003.**
