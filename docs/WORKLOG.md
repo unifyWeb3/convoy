@@ -219,3 +219,64 @@ docs/DEPLOYMENT.md, docs/TESTING.md, docs/AI_WORKFLOW.md, README.md, .convoy/pla
 .convoy/agents/lead-protocol-engineer.md, .convoy/instructions/coding-standards.md,
 .convoy/checklists/milestone-done.md, .convoy/templates/pr.md, .convoy/tasks/CVY-003.md,
 packages/kh-client/test/vcr/dec-001.simulate.84532.probe.json, docs/WORKLOG.md
+
+---
+
+## CVY-004 — 2026-08-03 — kh-client: KeeperHub REST direct execution
+
+The one module permitted to reach `app.keeperhub.com`. Write, simulate, status polling,
+check-and-execute, error classification, idempotency, VCR replay.
+
+**114 tests green** in the package (67 new + 47 CVY-002 parity). All four grep-guards clean;
+`format:check`, `-r lint`, `-r typecheck`, `-r build`, `-r test` clean.
+
+**Verified live against Base Sepolia, through the built client** — not raw fetch, so what is proven
+is the client rather than the API: simulate-veto returned 400 `wouldRevert:true`; simulate-pass
+returned 200 `gasEstimate:25989`; the write returned 202 `completed`, execution
+`415udzxz33omkbg8okz17`; the status poll returned the hash
+`0x94502f69ef87d4bfe75053064275c210e27f7502d78babffb60e59dbc81b4426`
+(https://sepolia.basescan.org/tx/0x94502f69ef87d4bfe75053064275c210e27f7502d78babffb60e59dbc81b4426),
+`gasUsedWei:74093`, `retryCount:0`, `sponsored:true`. **That transaction is a client smoke test, not
+CVY-003's submission artifact** — the submission transaction is `openRun` on the deployed registry and
+is not claimed anywhere yet.
+
+**Four new drift findings, all from measurement rather than documentation:**
+
+- **G-21** — a would-revert simulate answers on **HTTP 400** with `success:false` and
+  `wouldRevert:true`. The verdict is `wouldRevert`, not `success`. Classifying that 400 as an API
+  error would turn every Critic veto into a hard failure and remove the veto mechanism. Mitigated,
+  and the inverse guarded: a 400 with no `wouldRevert` field throws rather than reporting "would not
+  revert", which would let the Critic approve an item the API never evaluated.
+- **G-23** — a synchronous write returns `202 {status:"completed"}` with **no** `transactionHash`;
+  the hash exists only on `GET /status`. Gap G-02's mitigation is "short-circuit the poll on a
+  terminal POST", and applied literally that discards the transaction hash — the field the manifest's
+  KeeperHub leg, the honesty table and the Basescan link all depend on. **This was a real bug in the
+  first implementation**, found by running the live write, not by reading docs. `pollUntilTerminal`
+  now short-circuits only on `terminal && transactionHash`.
+- **G-22** — an unsupported chain returns **HTTP 500 with an empty body**, and 5xx is transient, so a
+  permanent misconfiguration would be retried until the budget ran out. `KhClient` now validates
+  `chainId` at construction, before anything is sent. This also retroactively strengthens the DEC-001
+  probe: an unsupported 84532 would have looked unmistakably different from the 200 it returned.
+- **G-20** — `revertReason` is an ethers v6 diagnostic blob, not the documented `Error(...)`. **OPEN
+  and deliberately not attributed:** the probe used WETH9, whose bare `require` emits no revert data
+  at all, so `data=null` may be the contract's fault rather than the API's. `MockRewardDistributor`
+  uses custom errors and should decode better. Re-measure at CVY-003 before concluding anything —
+  CVY-011's veto evidence quality depends on the answer.
+
+**Falsifiability.** Six mutations, each caught: removing `expectedStatuses:[400]` (2 fail); moving the
+coded-run-error check after the status rules (6 fail); swapping the two 409s (2 fail); dropping
+`attempt` from the idempotency key (3 fail); treating a 0 poll-hint as absent (1 fail); short-circuiting
+the poll on terminality alone (1 fail). All reverted, 114 green.
+
+**D-019 — acceptance criterion substituted, not met.** CVY-004 names a `fund`-before-`setRoot` call
+returning `wouldRevert:true`. `MockRewardDistributor` is not deployed (that is CVY-003), so the veto
+path was proven with a different genuinely-reverting call: WETH9 `withdraw` of more than the wallet
+holds. Nothing is staged — the contract legitimately rejects it — but this is a substitution of the
+named revert source and is recorded as such rather than ticked off. The named case must run at CVY-003.
+
+Decisions D-016…D-020. Files: `packages/kh-client/src/{types,errors,idempotency,client,contractCall,status,checkAndExecute,index}.ts`,
+`packages/kh-client/test/{errors.classify,contractCall.simulate.wouldRevert,contractCall.write.executionId,status.pollHint,idempotency.key}.test.ts`,
+`packages/kh-client/test/vcr/*.json`, `packages/kh-client/README.md`, `.prettierignore`,
+`docs/{KNOWN_GAPS,DECISIONS,TESTING,IMPLEMENTATION_STATUS,WORKLOG}.md`
+
+**Next: CVY-003**, now genuinely unblocked — credentials present, write path proven.

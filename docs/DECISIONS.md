@@ -192,3 +192,45 @@ run against 8453 was required. The redacted request and response are recorded ve
 The probe passed an explicit `abi` and targeted the WETH9 predeploy
 `0x4200000000000000000000000000000000000006` deliberately, so a failure could not have been
 misattributed: an unresolved ABI or a missing contract would otherwise read as a rejected network.
+
+---
+
+**D-016 2026-08-03: `simulate` is omitted entirely on a write rather than sent as `false`.**
+The API treats `simulate` as a strict boolean and the documented contract is `simulate:true`. Sending
+`simulate:false` is a different request from omitting the field, and nothing verifies that the API
+treats them identically. `buildContractCallBody` therefore adds the key only for simulates. Pinned by
+a test asserting `'simulate' in body === false` for writes.
+
+**D-017 2026-08-03: the chain id is validated in the `KhClient` constructor, not at the call site.**
+An unsupported chain returns HTTP 500 with an empty body (gap G-22), and 5xx is classified transient,
+so a permanent configuration error would be retried until the attempt budget ran out. Validating once
+at construction turns that into an immediate local failure and means no call site can forget. The
+supported set is `{84532, 8453}` — the DEC-001 target plus the optional CVY-019 flip.
+
+**D-018 2026-08-03: `pollUntilTerminal` short-circuits on `terminal && transactionHash`, not on
+`terminal` alone.**
+Gap G-02's mitigation is "short-circuit the poll when the POST response is already terminal". Applied
+literally that is wrong: the live smoke showed a synchronous write returning
+`202 {status:"completed"}` with **no** `transactionHash`, which appears only on `GET /status`
+(gap G-23). Short-circuiting on terminality alone silently discards the transaction hash — the field
+the manifest's KeeperHub leg, the README honesty table and the Basescan link all depend on. The
+stricter condition is what supplies the second half of the architecture's `SUBMITTED → LANDED` guard.
+This was found by executing a real write, not by reading the documentation, which is the argument for
+the live smoke being part of the milestone rather than an optional extra.
+
+**D-019 2026-08-03: the CVY-004 revert-source acceptance criterion is met with WETH9, and the
+`MockRewardDistributor` case is deferred to CVY-003.**
+CVY-004's criteria name a `fund`-before-`setRoot` call returning `wouldRevert:true`. That contract is
+not deployed — deploying it is CVY-003 scope. The veto path is therefore proven against a different
+**genuinely reverting** call: WETH9 `withdraw` of more than the wallet holds. Nothing is staged; the
+contract legitimately rejects it. This is a **substitution of the named revert source**, not a
+satisfied criterion, and it is recorded as such rather than quietly ticked off. The named case must be
+run at CVY-003 once `MockRewardDistributor` exists — and it carries a second purpose, because gap
+G-20 needs a custom-error contract to establish whether poor `revertReason` decoding is the API's
+fault or WETH9's.
+
+**D-020 2026-08-03: VCR tapes are recorded from real responses and `.prettierignore`d.**
+Same reasoning as D-014 for the payloadHash fixtures. A tape that has been reformatted is a
+transcription, not a recording, and the value of a tape is that the bytes came off the wire. A missing
+tape throws rather than falling through to a default, because a VCR suite that silently passes when a
+tape is absent is worse than no VCR suite.

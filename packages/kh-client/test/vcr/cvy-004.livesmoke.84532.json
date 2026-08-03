@@ -1,0 +1,23 @@
+{
+  "simulateVeto": {
+    "httpStatus": 400,
+    "wouldRevert": true,
+    "revertReason": "Simulation reverted: missing revert data (action=\"call\", data=null, reason=null, transaction={ \"data\": \"0x2e1a7d4d00000000000000000000000000000000000000000000d3c21bcecceda1000000\", \"from\": \"0x65F5AFd3b4d5F7d58C408300569a11f0EC190Da6\", \"to\": \"0x4200000000000000000000000000000000000006\" }, invocation=null, revert=null, code=CALL_EXCEPTION, version=6.16.0)"
+  },
+  "simulatePass": {
+    "httpStatus": 200,
+    "wouldRevert": false,
+    "gasEstimate": "25989"
+  },
+  "write": {
+    "httpStatus": 202,
+    "executionId": "415udzxz33omkbg8okz17",
+    "status": "completed",
+    "terminal": true,
+    "idempotencyKey": "cvy004smoke1785797130955:0:0"
+  },
+  "finalStatus": {
+    "status": "completed",
+    "terminal": true
+  }
+}

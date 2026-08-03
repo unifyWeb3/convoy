@@ -1,0 +1,42 @@
+{
+  "httpStatus": 200,
+  "responseHeaders": {
+    "content-type": "application/json",
+    "x-poll-interval-hint": "0"
+  },
+  "responseBody": {
+    "executionId": "415udzxz33omkbg8okz17",
+    "status": "completed",
+    "type": "contract-call",
+    "transactionHash": "0x94502f69ef87d4bfe75053064275c210e27f7502d78babffb60e59dbc81b4426",
+    "transactionLink": "https://sepolia.basescan.org/tx/0x94502f69ef87d4bfe75053064275c210e27f7502d78babffb60e59dbc81b4426",
+    "sponsored": true,
+    "result": {
+      "chainId": 84532,
+      "gasUsed": "74093",
+      "success": true,
+      "sponsored": true,
+      "executedCall": {
+        "args": {},
+        "reverted": false,
+        "sponsored": true,
+        "topLevelTo": "0x5af5194b4b0909eb978e3cf1e25333852277f07d",
+        "functionName": "deposit",
+        "contractAddress": "0x4200000000000000000000000000000000000006",
+        "functionSignature": "deposit()"
+      },
+      "gasUsedUnits": "74093",
+      "transactionHash": "0x94502f69ef87d4bfe75053064275c210e27f7502d78babffb60e59dbc81b4426",
+      "transactionLink": "https://sepolia.basescan.org/tx/0x94502f69ef87d4bfe75053064275c210e27f7502d78babffb60e59dbc81b4426",
+      "effectiveGasPrice": "6000000"
+    },
+    "error": null,
+    "gasUsedWei": "74093",
+    "gasPriceWei": "6000000",
+    "estimatedCostUsd": null,
+    "retryCount": 0,
+    "network": "84532",
+    "createdAt": "2026-08-03T22:45:31.169Z",
+    "completedAt": "2026-08-03T22:45:35.155Z"
+  }
+}

@@ -3,7 +3,9 @@
 The test catalog from Implementation Blueprint §9. Rows are implemented by the milestone named in the
 last column; at CVY-000 the harnesses exist and the suites are empty. As of CVY-001 the three
 contract rows are implemented and green — 45 Foundry tests, invariants at `runs=1000 depth=32`. As
-of CVY-002 the payloadHash-parity row is green too — 47 assertions over 13 dumped fixtures.
+of CVY-002 the payloadHash-parity row is green too — 47 assertions over 13 dumped fixtures. As of
+CVY-004 the kh-client row is green — 114 tests total in that package, over tapes recorded from the
+live API.
 
 ## Catalog
 
@@ -13,7 +15,7 @@ of CVY-002 the payloadHash-parity row is green too — 47 assertions over 13 dum
 | Invariant          | `invariant_noCommitBeforeOpen`, `invariant_noDoubleSeal`, `invariant_idxMonotonic`, `invariant_committedCountMatches`                                                            | `forge test --match-path 'test/*.invariant.t.sol'` | CVY-001           |
 | Contract fmt/build | —                                                                                                                                                                                | `forge fmt --check && forge build`                 | CVY-001           |
 | payloadHash parity | `payloadHash.parity.test.ts` (13 dumped fixtures × 3 assertions + 8 behavioural)                                                                                                 | `pnpm --filter @convoy/kh-client test`             | CVY-002           |
-| kh-client (VCR)    | `contractCall.simulate.wouldRevert.test.ts`, `contractCall.write.executionId.test.ts`, `status.pollHint.test.ts`, `errors.classify.test.ts`, `idempotency.key.test.ts`           | `pnpm --filter @convoy/kh-client test`             | CVY-004           |
+| kh-client (VCR)    | `contractCall.simulate.wouldRevert.test.ts`, `contractCall.write.executionId.test.ts`, `status.pollHint.test.ts`, `errors.classify.test.ts`, `idempotency.key.test.ts`           | `pnpm --filter @convoy/kh-client test`             | CVY-004 ✅        |
 | DB                 | `schema.migrate.test.ts`, `seed.fixtures.test.ts`                                                                                                                                | `pnpm --filter @convoy/db test`                    | CVY-005           |
 | Queue              | `queue.dedupeJobId.test.ts`, `worker.gracefulShutdown.test.ts`                                                                                                                   | `pnpm --filter @convoy/worker test`                | CVY-006           |
 | State machine      | `orchestrator.3item.e2e.test.ts`, `guards.committedRequiresApprove.test.ts`, `guards.landedRequiresTxHash.test.ts`                                                               | `pnpm --filter @convoy/worker test`                | CVY-008           |

@@ -9,7 +9,65 @@
 // NEVER call_workflow for a write (it returns unsigned calldata to the caller
 // and bypasses the entire reliability stack).
 //
-// The KeeperHub client surface itself is a scaffold — implemented in CVY-004.
+// Convoy never sets a nonce and never holds a private key.
+
+export { KhClient, DEFAULT_RETRY } from './client.js';
+export type {
+  KhClientOptions,
+  KhResponse,
+  RequestOptions,
+  RetryPolicy,
+  VcrTape,
+} from './client.js';
+
+export {
+  CONTRACT_CALL_PATH,
+  buildContractCallBody,
+  simulateContractCall,
+  writeContractCall,
+} from './contractCall.js';
+
+export { CHECK_AND_EXECUTE_PATH, checkAndExecute } from './checkAndExecute.js';
+export type { CheckAndExecuteParams } from './checkAndExecute.js';
+
+export {
+  POLL_HINT_HEADER,
+  getExecutionStatus,
+  parsePollHint,
+  pollUntilTerminal,
+  statusPath,
+} from './status.js';
+export type { PollOptions } from './status.js';
+
+export {
+  KhError,
+  classifyHttpError,
+  classifyTransportError,
+  extractMessage,
+  parseRetryAfter,
+} from './errors.js';
+export type { ClassifyInput, KhErrorClass, KhErrorInit } from './errors.js';
+
+export { IDEMPOTENCY_HEADER, buildIdempotencyKey, parseIdempotencyKey } from './idempotency.js';
+
+export {
+  SUPPORTED_CHAIN_IDS,
+  TERMINAL_STATUSES,
+  isSupportedChainId,
+  isTerminalStatus,
+} from './types.js';
+export type {
+  AttemptRef,
+  ChainId,
+  ContractCallParams,
+  ContractCallWireBody,
+  ExecutionStatus,
+  KhMode,
+  SimulateResult,
+  StatusResult,
+  WriteResult,
+} from './types.js';
+
 // The payload commitment helper landed at CVY-002 and is re-exported here so
 // consumers (the orchestrator, the manifest reconciler) import it from the
 // package entry point rather than reaching into `src/`.

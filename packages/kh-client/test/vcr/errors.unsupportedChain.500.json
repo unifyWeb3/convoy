@@ -1,0 +1,34 @@
+{
+  "name": "badChain",
+  "httpStatus": 500,
+  "responseHeaders": {
+    "cf-cache-status": "DYNAMIC",
+    "cf-ray": "a258caf96f0ed08a-CDG",
+    "connection": "keep-alive",
+    "date": "Mon, 03 Aug 2026 22:34:59 GMT",
+    "expect-ct": "max-age=86400, enforce",
+    "kh-minimum-cli-version": "0.11.1",
+    "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+    "permissions-policy": "geolocation=(), microphone=(), camera=()",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=NpqMZyFBm6sybgOeB6PVq5Xft1uSf4YO5qtYoiNQEQl%2FqMzvHZmO7163Sg2lfomkM%2BRIKV%2FUhI0PhgRUWuOcamqbPcbVK4EWjIOC0i5bpHgHrdgmMVyMdcqpl1ow1j4oa5CC\"}]}",
+    "server": "cloudflare",
+    "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+    "transfer-encoding": "chunked",
+    "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "SAMEORIGIN",
+    "x-xss-protection": "1; mode=block"
+  },
+  "request": {
+    "chainId": "999999",
+    "network": "999999",
+    "contractAddress": "0x4200000000000000000000000000000000000006",
+    "functionName": "deposit",
+    "functionArgs": "[]",
+    "abi": "[{\"name\":\"deposit\",\"type\":\"function\",\"stateMutability\":\"payable\",\"inputs\":[],\"outputs\":[]}]",
+    "simulate": true,
+    "_authorization": "Bearer kh_AHU\u20260R0I (35 chars)"
+  },
+  "responseBody": ""
+}

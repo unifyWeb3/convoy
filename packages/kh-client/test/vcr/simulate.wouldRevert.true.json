@@ -1,0 +1,47 @@
+{
+  "name": "simulateWouldRevert",
+  "httpStatus": 400,
+  "responseHeaders": {
+    "cf-cache-status": "DYNAMIC",
+    "cf-ray": "a258caedf9a8d08a-CDG",
+    "connection": "keep-alive",
+    "content-type": "application/json",
+    "date": "Mon, 03 Aug 2026 22:34:58 GMT",
+    "expect-ct": "max-age=86400, enforce",
+    "kh-minimum-cli-version": "0.11.1",
+    "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+    "permissions-policy": "geolocation=(), microphone=(), camera=()",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=sjG7%2Fe9qr7mqNZEX3Qp0JXrJVbMMSAsOfxrtR7xJqjvMWe%2FLibOzr4vL6EtjlGsExo8lJiSv84DJMZZoxG4GootRV2Oj4fGMRM4MtJnfc6Ilo0ObSW%2F63jloCk41rl5R1Dvo\"}]}",
+    "server": "cloudflare",
+    "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+    "transfer-encoding": "chunked",
+    "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "SAMEORIGIN",
+    "x-ratelimit-limit": "60",
+    "x-ratelimit-remaining": "59",
+    "x-ratelimit-reset": "1785796558",
+    "x-xss-protection": "1; mode=block"
+  },
+  "request": {
+    "chainId": "84532",
+    "network": "84532",
+    "contractAddress": "0x4200000000000000000000000000000000000006",
+    "functionName": "withdraw",
+    "functionArgs": "[\"1000000000000000000000000\"]",
+    "abi": "[{\"name\":\"withdraw\",\"type\":\"function\",\"stateMutability\":\"nonpayable\",\"inputs\":[{\"name\":\"wad\",\"type\":\"uint256\"}],\"outputs\":[]}]",
+    "simulate": true,
+    "_authorization": "Bearer kh_AHU\u20260R0I (35 chars)"
+  },
+  "responseBody": {
+    "success": false,
+    "status": "simulated",
+    "from": "0x65f5afd3b4d5f7d58c408300569a11f0ec190da6",
+    "to": "0x4200000000000000000000000000000000000006",
+    "value": "0",
+    "wouldRevert": true,
+    "revertReason": "Simulation reverted: missing revert data (action=\"estimateGas\", data=null, reason=null, transaction={ \"data\": \"0x2e1a7d4d00000000000000000000000000000000000000000000d3c21bcecceda1000000\", \"from\": \"0x65F5AFd3b4d5F7d58C408300569a11f0EC190Da6\", \"to\": \"0x4200000000000000000000000000000000000006\" }, invocation=null, revert=null, code=CALL_EXCEPTION, version=6.16.0)",
+    "error": "Simulation reverted: missing revert data (action=\"estimateGas\", data=null, reason=null, transaction={ \"data\": \"0x2e1a7d4d00000000000000000000000000000000000000000000d3c21bcecceda1000000\", \"from\": \"0x65F5AFd3b4d5F7d58C408300569a11f0EC190Da6\", \"to\": \"0x4200000000000000000000000000000000000006\" }, invocation=null, revert=null, code=CALL_EXCEPTION, version=6.16.0)"
+  }
+}
