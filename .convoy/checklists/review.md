@@ -20,20 +20,28 @@ The block below is the frozen checklist from the Implementation Blueprint §3. E
 
 ## How to check the mechanical ones
 
+Build output is excluded (`out/`, `dist/`): CI checks out a clean tree, but you are running these
+in a working copy where `forge build` has already emitted
+`packages/contracts/out/Deploy.s.sol/Deploy.json` — which contains the string `PRIVATE_KEY` and
+would trip the key guard for no reason (gap G-15).
+
 ```bash
 # no KeeperHub fetch outside the client package
 grep -rn "app\.keeperhub\.com" apps packages services scripts \
-  --include=*.ts --include=*.tsx | grep -v "^packages/kh-client/"
+  --include=*.ts --include=*.tsx \
+  --exclude-dir=out --exclude-dir=dist --exclude-dir=node_modules | grep -v "^packages/kh-client/"
 
 # no nonce set in client or worker payloads
 grep -rn "nonce[[:space:]]*:" packages/kh-client/src services/worker/src apps/web/lib
 
 # private key referenced only under packages/contracts/script
-grep -rln "PRIVATE_KEY" apps packages services scripts | grep -v "^packages/contracts/script/"
+grep -rln "PRIVATE_KEY" apps packages services scripts \
+  --exclude-dir=out --exclude-dir=dist --exclude-dir=node_modules | grep -v "^packages/contracts/script/"
 
 # no staged failures in non-test code
 grep -rnE "mockRevert|fakeTxHash|throw new Error\(\"fake" apps packages services scripts \
-  --include=*.ts --include=*.tsx | grep -vE "(test|spec|__tests__|fixtures)"
+  --include=*.ts --include=*.tsx \
+  --exclude-dir=out --exclude-dir=dist --exclude-dir=node_modules | grep -vE "(test|spec|__tests__|fixtures)"
 ```
 
 Each command must return **no output**. These are the same guards `.github/workflows/ci.yml` runs.

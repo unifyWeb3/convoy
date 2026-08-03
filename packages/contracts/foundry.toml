@@ -12,6 +12,12 @@ bytecode_hash = "none"
 # Reverts are a product feature: they are what `simulate:true` decodes into
 # `revertReason` for the Critic. Custom errors only, no require strings.
 
+# Write access for exactly one directory, the payloadHash parity fixtures
+# (CVY-002). They are dumped by script/DumpPayloadHashFixtures.s.sol rather than
+# hand-written, so the TypeScript side is checked against real Solidity output.
+# Scoped deliberately: no other path is writable.
+fs_permissions = [{ access = "write", path = "../../tests/fixtures" }]
+
 [profile.default.fuzz]
 runs = 256
 

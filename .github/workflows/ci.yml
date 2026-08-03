@@ -21,6 +21,13 @@ jobs:
   # They are scoped to code directories (apps, packages, services, scripts) so
   # that documentation, .env.example and CLAUDE.md — which legitimately name
   # app.keeperhub.com and PRIVATE_KEY — do not cause false failures.
+  #
+  # Build output (out/, dist/) is excluded too. This job checks out a clean tree
+  # so CI never sees those directories, but the same commands are meant to be
+  # run locally by a reviewer, and locally they DO exist: compiling Deploy.s.sol
+  # emits packages/contracts/out/Deploy.s.sol/Deploy.json, which contains the
+  # string PRIVATE_KEY and tripped the key guard (CVY-002, gap G-15). A guard
+  # that cries wolf locally is a guard reviewers learn to ignore.
   # The same commands are mirrored in .convoy/checklists/review.md.
   # ---------------------------------------------------------------------------
   invariants:
@@ -34,6 +41,7 @@ jobs:
           set -o pipefail
           hits=$(grep -rn "app\.keeperhub\.com" apps packages services scripts \
                    --include='*.ts' --include='*.tsx' --include='*.js' --include='*.mjs' \
+                   --exclude-dir=out --exclude-dir=dist --exclude-dir=node_modules \
                    2>/dev/null | grep -v '^packages/kh-client/' || true)
           if [ -n "$hits" ]; then
             echo "::error::KeeperHub must only be reached from packages/kh-client."
@@ -58,8 +66,9 @@ jobs:
       - name: Convoy never holds a private key
         run: |
           set -o pipefail
-          hits=$(grep -rln "PRIVATE_KEY" apps packages services scripts 2>/dev/null \
-                   | grep -v '^packages/contracts/script/' || true)
+          hits=$(grep -rln "PRIVATE_KEY" apps packages services scripts \
+                   --exclude-dir=out --exclude-dir=dist --exclude-dir=node_modules \
+                   2>/dev/null | grep -v '^packages/contracts/script/' || true)
           if [ -n "$hits" ]; then
             echo "::error::PRIVATE_KEY may only be referenced under packages/contracts/script."
             echo "$hits"
@@ -72,7 +81,8 @@ jobs:
           set -o pipefail
           hits=$(grep -rnE "mockRevert|fakeTxHash|stageFailure|injectGasSpike|throw new Error\(\"fake" \
                    apps packages services scripts \
-                   --include='*.ts' --include='*.tsx' 2>/dev/null \
+                   --include='*.ts' --include='*.tsx' \
+                   --exclude-dir=out --exclude-dir=dist --exclude-dir=node_modules 2>/dev/null \
                    | grep -vE "(/test/|/tests/|/e2e/|/fixtures/|\.test\.|\.spec\.|__tests__)" || true)
           if [ -n "$hits" ]; then
             echo "::error::Convoy never stages a failure, injects a gas spike, or fakes a hash."

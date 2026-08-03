@@ -1,9 +1,56 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
-// Deploy script for ConvoyRegistry + MockRewardDistributor on Base (8453) and
-// Base Sepolia (84532). Implemented in CVY-002.
-//
-// DEPLOYER_PRIVATE_KEY is read ONLY here, by forge script. Convoy's runtime
-// holds no private key; a CI grep-guard enforces that PRIVATE_KEY appears
-// nowhere outside packages/contracts/script.
+import { Script } from "forge-std/Script.sol";
+import { console2 } from "forge-std/console2.sol";
+import { ConvoyRegistry } from "../src/ConvoyRegistry.sol";
+import { MockRewardDistributor } from "../src/MockRewardDistributor.sol";
+
+/// @title Deploy — ConvoyRegistry + MockRewardDistributor
+/// @notice Deploys both contracts on Base Sepolia (84532) or Base mainnet (8453).
+/// @dev `DEPLOYER_PRIVATE_KEY` is read **only** here, by `forge script`. Convoy's runtime holds no
+///      private key, and a CI grep-guard fails the build if `PRIVATE_KEY` appears anywhere outside
+///      `packages/contracts/script`.
+///
+///      Written at CVY-002, **run** at CVY-003. Two guards make an accidental deploy hard: the
+///      chain id must be one of the two supported networks (a stray run against anvil or any other
+///      chain reverts), and `vm.envUint` reverts when the key is absent. Without `--broadcast`,
+///      `forge script` only simulates — nothing is sent.
+///
+///      Testnet:  forge script script/Deploy.s.sol --rpc-url base_sepolia --broadcast --verify
+///      Mainnet:  forge script script/Deploy.s.sol --rpc-url base --broadcast --verify
+///
+///      Record both addresses in `.env` (`CONVOY_REGISTRY_ADDR`, `MOCK_DISTRIBUTOR_ADDR`),
+///      `docs/DEPLOYMENT.md`, and the README artifact table.
+contract Deploy is Script {
+    uint256 internal constant BASE_MAINNET = 8453;
+    uint256 internal constant BASE_SEPOLIA = 84_532;
+
+    error UnsupportedChain(uint256 chainId);
+
+    function run() external returns (ConvoyRegistry registry, MockRewardDistributor distributor) {
+        uint256 chainId = block.chainid;
+        if (chainId != BASE_MAINNET && chainId != BASE_SEPOLIA) revert UnsupportedChain(chainId);
+
+        uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+
+        vm.startBroadcast(deployerKey);
+        registry = new ConvoyRegistry();
+        distributor = new MockRewardDistributor();
+        vm.stopBroadcast();
+
+        console2.log("network:              %s", _networkName(chainId));
+        console2.log("chainId:              %s", chainId);
+        console2.log("deployer:             %s", vm.addr(deployerKey));
+        console2.log("ConvoyRegistry:        %s", address(registry));
+        console2.log("MockRewardDistributor: %s", address(distributor));
+        console2.log("");
+        console2.log("Record these in .env (CONVOY_REGISTRY_ADDR, MOCK_DISTRIBUTOR_ADDR),");
+        console2.log("docs/DEPLOYMENT.md, and the README artifact table.");
+    }
+
+    function _networkName(uint256 chainId) internal pure returns (string memory) {
+        if (chainId == BASE_MAINNET) return "Base mainnet";
+        return "Base Sepolia";
+    }
+}

@@ -9,5 +9,9 @@
 // NEVER call_workflow for a write (it returns unsigned calldata to the caller
 // and bypasses the entire reliability stack).
 //
-// Scaffold only. Implemented in CVY-004.
-export {};
+// The KeeperHub client surface itself is a scaffold — implemented in CVY-004.
+// The payload commitment helper landed at CVY-002 and is re-exported here so
+// consumers (the orchestrator, the manifest reconciler) import it from the
+// package entry point rather than reaching into `src/`.
+export { encodeArgs, payloadHash } from './payloadHash.js';
+export type { AbiArgValue, PayloadHashInput } from './payloadHash.js';
