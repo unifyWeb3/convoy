@@ -135,3 +135,9 @@ failed. `--exclude-dir=out --exclude-dir=dist --exclude-dir=node_modules` was ad
 guards that scan broadly. The guards' semantics are unchanged; only uncommitted generated output is
 skipped. A guard that cries wolf is a guard that gets ignored, and these guards are the mechanism
 that makes "no held keys" a claim rather than an aspiration.
+
+Loosening a guard without re-testing it would replace one failure mode with a worse one, so the
+exclusion was checked the same way the invariants were: planting
+`const k = process.env.PRIVATE_KEY;` in `services/worker/src/` makes guard 3 report the file, and
+removing it makes the guard clean again. The exclusion skips generated output and nothing else.
+**Re-run that probe whenever a guard's scope changes.**
