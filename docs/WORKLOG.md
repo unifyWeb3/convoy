@@ -57,7 +57,7 @@ packages/contracts/test/MockRewardDistributor.t.sol, docs/IMPLEMENTATION_STATUS.
 docs/KNOWN_GAPS.md, docs/DECISIONS.md, docs/TESTING.md, docs/WORKLOG.md, README.md,
 docs/milestones/CVY-001.md
 
-Commit: see docs/milestones/CVY-001.md §10
+Commit: 8b6ce3a
 
 Verification: forge test 45 passed / 0 failed across 3 suites; invariants 5×(runs 1000, calls 32000,
 reverts 0); forge fmt --check clean; forge build --sizes clean (ConvoyRegistry runtime 1,538 B);
