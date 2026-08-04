@@ -85,7 +85,16 @@ if (process.env['NODE_ENV'] !== 'production') globalThis.__convoyPrisma = client
 
 export const db: ConvoyDb = client as ConvoyDb;
 
-/** Escape hatch for migrations, seeds and tests — never for application code. */
+/**
+ * The full `PrismaClient` surface — `$transaction`, `$queryRaw`, and every model
+ * delegate — for migrations, seeds, orchestration and tests.
+ *
+ * **The append-only rule still applies.** This is the same underlying client, so
+ * `event.update`/`delete` throw here too; the name says "unsafe" because it
+ * bypasses the *typed* narrowing, not because it bypasses the guard. To remove
+ * events, delete the owning run — the cascade is the only sanctioned path, and
+ * it removes the whole audit trail rather than editing it.
+ */
 export const unsafeRawClient: PrismaClient = client;
 
 // ---------------------------------------------------------------------------

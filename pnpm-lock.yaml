@@ -110,6 +110,9 @@ importers:
       ioredis:
         specifier: ^6.0.0
         version: 6.0.0
+      viem:
+        specifier: ^2.55.10
+        version: 2.55.10(typescript@5.9.3)
 
 packages:
 

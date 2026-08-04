@@ -418,3 +418,58 @@ addition** — §5(i) names it explicitly as `SKIPPED(budget-exhausted)` — and
 that produces it, which is how the omission surfaced. Checking the frozen text before appending to
 the array is what caught this; adding a state that the machine does not name would have been an
 architecture surface change.
+
+**DEC-006 2026-08-04: the serializing nonce belongs to a KeeperHub RELAY EOA, not the org Turnkey
+wallet. Serialization is real; the demo narration's attribution is not. Flagged for CVY-019.**
+
+Measured by dispatching 12 independent items concurrently through EXECUTE and reading every receipt.
+
+| Question                       | Answer                                                                                                                                                                  |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `from` — same relay or a pool? | **A single relay EOA**, `0x6331eb4571de9284f7e9ead98ac7b0661a091e99`, for **11 of 12**. Not a pool. The 12th came from the **org wallet itself**, `0x65f5afd3…90da6`    |
+| Strictly increasing nonces?    | **Yes.** Relay nonces 2485, 2486, 2487, 2488 … 2493–2496 … 2501–2503. The gaps are this run's own interleaved `commitAction` writes. The org-wallet tx used its nonce 1 |
+| Same block or successive?      | **Successive** — roughly one transaction per 2s block, never batched                                                                                                    |
+
+**What is true:** concurrent submits genuinely serialize. There is one sequential nonce, it strictly
+increases, and Convoy's dispatch width does not change the landing order. The reliability substrate
+is real, and **backup path d survives** — nonce serialization is reproducible and deterministic.
+
+**What is NOT true as currently narrated:** §15 says _"one wallet, one sequential nonce"_ and
+attributes the serialization to the **org Turnkey wallet**. It belongs to a KeeperHub relay. A judge
+opening any of these hashes on Basescan sees `from` = a relay address, not the wallet the narration
+names. **This is a demo-narration risk for CVY-019 and is reported, not fixed here** — the narration
+is the operator's to adjust.
+
+**Amends DEC-004.** DEC-004 concluded from a single transaction that "the org wallet's balance does
+not move". Under a 12-item concurrent burst that is **false**: one write bypassed the relay, was sent
+by the org wallet, and the wallet paid its own fee — balance 100000000000000000 →
+99999717707646113, a delta of **282,292,353,887 wei**, exactly that transaction's
+`gasUsed × effectiveGasPrice + l1Fee`. Sponsorship is therefore **partial and not guaranteed per
+transaction**. The runbook's org-wallet funding threshold is **load-bearing, not belt-and-braces** —
+keeping it was correct for a better reason than the one recorded at CVY-007. G-08's "never
+load-bearing" stands and is now doubly justified.
+
+**DEC-007 2026-08-04: `EXECUTE_FANOUT` stays at 4. Measured, no longer provisional.**
+
+The same 12-item batch, twice:
+
+| Fanout | Elapsed    | Landed |
+| ------ | ---------- | ------ |
+| 4      | **75.5 s** | 12/12  |
+| 12     | **77.8 s** | 12/12  |
+
+Tripling dispatch width changed nothing (the 2.3 s difference is inside run-to-run noise, and the
+larger value was marginally _slower_). **Throughput is bounded by KeeperHub's sequential nonce, not
+by Convoy's dispatch width** — which is exactly the architecture's claim, now measured rather than
+asserted. 4 is enough to create genuine contention at the serialization point; more only adds
+in-flight state and rate-limit pressure (observed limit: 60/min) for zero gain. DEC-002's provisional
+default becomes the settled value.
+
+**D-029 2026-08-04: the plan is hardcoded and the APPROVE guard is simulator-only, until CVY-010/011.**
+There is no Planner and no LLM Critic yet. `phasePlan` writes a plan derived from the seeded item
+order and its declared `dependsOn` edges; the `COMMITTED requires APPROVE` guard is satisfied by the
+deterministic kh-client `simulate:true` alone. **This is a substitution, recorded rather than ticked
+off.** CVY-010 replaces the plan source; CVY-011 layers the LLM Critic **on top of** this gate — the
+simulator remains the corroborating verifier, and any VETO(would_revert) must still be backed by
+`simulate.wouldRevert = true`. Nothing here is staged: the veto observed in acceptance is
+`RootNotSet()`, decoded from selector `0x1c8b6259`, raised by the contract's own precondition.

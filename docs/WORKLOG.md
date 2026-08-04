@@ -547,3 +547,78 @@ bar is zero false vetoes. The pay leg is present and unused (G-17).
 
 22 budget tests; 44 in the worker; 197 repo-wide; 45 Foundry; verify-env 13/0/0. Decisions DEC-004,
 DEC-005, D-028. Gap G-28; G-18 widened. **Next: CVY-008.**
+
+---
+
+## CVY-008 — 2026-08-04 — Orchestrator + RUN/ITEM state machine
+
+**Acceptance met on 84532.** A 3-item batch ran `RECEIVED → SEALED_OK`, all three LANDED with real
+hashes, 21 events, the deferral gate releasing items 1 and 2 as their dependencies landed:
+
+- openRun `0xb4b7f65a…4974a` · seal `0xa594cea3…6452`
+- idx 0 `setRoot` `0x79ec7534…9b158` · idx 1 `fund` `0x756d8e79…8431e` · idx 2 `enableMarket` `0x3cc14df8…3ecaea`
+
+**A genuinely invalid item is VETOED at zero gas.** Against a freshly-deployed distributor
+(`0x484D1811…76d5`) with no root, `fund` before `setRoot` returned `wouldRevert:true`, selector
+`0x1c8b6259` decoded to **`RootNotSet()`**. The item's only attempt row is a SIMULATE with
+`gas=0` and no txHash — it never reached COMMIT. Nothing staged: the contract's own precondition.
+
+### MEASUREMENT 1 — whose nonce serializes? (DEC-006, G-30)
+
+12 independent items dispatched concurrently, every receipt read:
+
+|        |                                                                                                                                              |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `from` | **A single relay EOA** `0x6331eb45…091e99` for **11 of 12** — not a pool. The 12th came from the **org wallet itself**                       |
+| nonces | **Strictly increasing**: 2485–2488, 2493–2496, 2501–2503 (gaps are this run's interleaved `commitAction` writes). Org-wallet tx used nonce 1 |
+| blocks | **Successive**, ~1 tx per 2s block. Never batched                                                                                            |
+
+**Serialization is real** — one sequential nonce, strictly increasing, unaffected by dispatch width.
+Backup path d survives. **But the nonce belongs to a KeeperHub relay, not the org Turnkey wallet**,
+and §15 narrates "one wallet, one sequential nonce" meaning the org wallet. A judge opening any hash
+on Basescan sees a `from` the narration never mentions. **Reported, not fixed** — G-30, for CVY-019.
+
+**This also amends DEC-004.** That conclusion — "the org wallet's balance does not move" — came from
+a single transaction and is **false under load**: one write bypassed the relay and the org wallet
+paid its own fee, 100000000000000000 → 99999717707646113, a delta of **282,292,353,887 wei**, exactly
+that transaction's `gasUsed × effectiveGasPrice + l1Fee`. **Sponsorship is partial and not guaranteed
+per transaction**, so the runbook's org-wallet funding threshold is **load-bearing**, not
+belt-and-braces. G-18 and the README honesty row corrected accordingly.
+
+### MEASUREMENT 2 — EXECUTE_FANOUT settled (DEC-007)
+
+Same 12-item batch, twice: **fanout 4 → 75.5s**, **fanout 12 → 77.8s**, both 12/12 landed. Tripling
+dispatch width changed nothing and was marginally slower. **Throughput is bounded by KeeperHub's
+sequential nonce, not by Convoy's dispatch width** — the architecture's claim, now measured. **4
+stays**, no longer provisional: enough to create genuine contention, without adding in-flight state
+and rate-limit pressure (observed limit 60/min) for zero gain.
+
+### G-29 — the idempotency key has no phase namespace
+
+**The first acceptance run failed and the failure was the finding.** Item 0 came back
+`Idempotency-Key was reused with a different request payload`. The frozen key
+`<runId>:<idx>:<attempt>` reads as one write per item, but a run makes **2 + 2K** writes — `openRun`
+and item 0's write both key to `<run>:0:0`. KeeperHub returned `idempotency_conflict`, which the
+CVY-004 classifier correctly routed to `item-failed` with no retry. **The safety mechanism worked
+exactly as designed; my key namespacing was the bug.** The phase is now folded into the runId
+component, preserving the frozen three-part shape.
+
+### D-029 — interim substitution, recorded not ticked off
+
+No Planner and no LLM Critic yet. The plan is derived from the seeded item order; the
+`COMMITTED requires APPROVE` guard is satisfied by the deterministic simulate alone. CVY-010 replaces
+the plan source; **CVY-011 layers the Critic on top of this gate**, with the simulator remaining the
+corroborating verifier.
+
+Guards implemented as frozen: COMMIT requires prior SIMULATED; `SUBMITTED→LANDED` requires
+`completed` **and** a non-null hash from `GET /status` (G-23 — the terminal POST does not carry it);
+RETRYING only on a transient code, capped at 2 then FAILED; config-revert terminal. Every transition
+is one DB transaction emitting exactly one events row, guarded on the expected prior state so a
+concurrent or re-picked worker no-ops instead of double-transitioning.
+
+Also fixed: `seed.fixtures.test.ts` asserted no attempt **anywhere** carried a hash — true only until
+a run executed. Scoped to the two fixtures. And `unsafeRawClient`'s comment claimed to be an escape
+hatch; the append-only guard applies to it too (it fired during development), so the comment now says
+what it actually does.
+
+197 tests repo-wide; verify-env 13/0/0; guards clean. **Next: GATE 1 — the operator calls it.**

@@ -87,7 +87,15 @@ describe('the 12-item fixture (GATE 2)', () => {
 
 describe('both fixtures', () => {
   it('carry no transaction hash — a seeded hash would be a fabricated one', async () => {
-    expect(await raw.attempt.count({ where: { txHash: { not: null } } })).toBe(0);
+    // Scoped to the two fixtures. The original assertion queried EVERY attempt
+    // in the database, which passed only while no run had ever executed — once
+    // CVY-008 landed real transactions it reported their hashes as a failure.
+    // The claim is about the seed, not about the database.
+    expect(
+      await raw.attempt.count({
+        where: { txHash: { not: null }, item: { runId: { in: [RUN_3, RUN_12] } } },
+      }),
+    ).toBe(0);
   });
 
   it('store the frozen ETH/USD rate so gas accounting is reproducible', async () => {

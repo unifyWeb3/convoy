@@ -1,6 +1,6 @@
 # Convoy Implementation Status (updated 2026-08-03)
 
-Overall: **40% (CVY-000…CVY-007 done; DEC-001…DEC-005 applied)** Next milestone: **CVY-008 — Orchestrator + RUN/ITEM state machine**
+Overall: **45% (CVY-000…CVY-008 done; DEC-001…DEC-007 applied)** Next milestone: **CVY-GATE1 — thin slice, real tx landed via Convoy**
 
 **The submission requirement is provisionally met.** Both contracts are deployed and
 Basescan-verified on Base Sepolia, and `openRun` landed through the org Turnkey wallet:
