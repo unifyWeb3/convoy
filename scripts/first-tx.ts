@@ -220,9 +220,15 @@ async function main(): Promise<void> {
   console.log(`   status       : ${final.status}`);
   console.log(`   txHash       : ${final.transactionHash ?? '(none)'}`);
   console.log(`   txLink       : ${final.transactionLink ?? '(none)'}`);
-  console.log(`   gasUsedWei   : ${final.gasUsedWei ?? '(none)'}`);
+  // `gasUsedWei` means gas UNITS on a sponsored execution and the L2 fee in WEI
+  // on an unsponsored one (gap G-31), so the client exposes whichever it is
+  // rather than one field that changes meaning underneath the reader.
+  console.log(`   sponsored    : ${final.sponsored ?? '(none)'}`);
+  console.log(
+    `   gas reported : ${final.gasReportedRaw ?? '(none)'} (${final.gasReportedMeaning ?? 'unknown'})`,
+  );
+  console.log(`   gasPriceWei  : ${final.gasPriceWei ?? '(none)'}`);
   console.log(`   retryCount   : ${String(raw['retryCount'] ?? '(none)')}`);
-  console.log(`   sponsored    : ${String(raw['sponsored'] ?? '(none)')}`);
 
   saveTape('cvy-003.openRun.firstTx.json', {
     recordedAt: new Date().toISOString(),

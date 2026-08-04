@@ -133,17 +133,52 @@ function tcpProbe(host: string, port: number, payload?: string, timeoutMs = 3000
   });
 }
 
-async function rpcCall(url: string, method: string, params: unknown[]): Promise<unknown> {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const body = (await response.json()) as { result?: unknown; error?: { message?: string } };
-  if (body.error) throw new Error(body.error.message ?? 'rpc error');
-  return body.result;
+/**
+ * One RPC call, retried on TRANSPORT failure only.
+ *
+ * Measured 2026-08-04: DNS resolution for the provider host fails intermittently
+ * from this environment — roughly one attempt in five returns `ENOTFOUND` while
+ * the rest answer correctly. Without a retry, a single blip makes this matrix
+ * report "RPC pinned 84532: FAIL (expected until CVY-003)" on a repository where
+ * CVY-003 is long done, which is exactly the kind of wrong status that gets
+ * believed.
+ *
+ * An RPC *error response* is not retried — a wrong chain id or a missing
+ * contract is an answer, and repeating the question does not change it.
+ */
+async function rpcCall(
+  url: string,
+  method: string,
+  params: unknown[],
+  attempts = 3,
+): Promise<unknown> {
+  let lastTransportError: unknown;
+  for (let i = 0; i < attempts; i += 1) {
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch (e) {
+      lastTransportError = e;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 500 * (i + 1)));
+      continue;
+    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const body = (await response.json()) as { result?: unknown; error?: { message?: string } };
+    if (body.error) throw new Error(body.error.message ?? 'rpc error');
+    return body.result;
+  }
+  const detail =
+    lastTransportError instanceof Error ? lastTransportError.message : String(lastTransportError);
+  const cause =
+    lastTransportError instanceof Error && lastTransportError.cause !== undefined
+      ? ` (${String(lastTransportError.cause)})`
+      : '';
+  throw new Error(`${detail}${cause} after ${attempts} attempts`);
 }
 
 // ---------------------------------------------------------------------------

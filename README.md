@@ -33,7 +33,7 @@ milestones land — a row without an artifact link is not a claim Convoy makes.
 | Retries are genuine                                     | Onchain retries come from KeeperHub's transient handling and are only observed and recorded                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | _retry chip / manifest line pending_                                                                                        | CVY-015           | PENDING  |
 | The budget meter is not fabricated                      | **Two figures, never conflated (DEC-010).** _Gas consumed_ = `gasUsed × effectiveGasPrice + l1Fee`, composed from the chain receipt — always recorded, and what drains the budget. _Wallet debited_ = the same figure only where the execution record says `sponsored:false`, and zero where the paymaster paid. KeeperHub's ERC-4337 paymaster covers ~$1/month on a free account and then stops, so the two numbers are both real and they differ. **USD is notional** at a frozen price on a testnet (G-04, G-18). Payment leg unused until CVY-017 (G-17) | `services/worker/src/budget.ts` · `services/worker/test/budget.payerSplit.test.ts` · `services/worker/scripts/gasfield.mjs` | CVY-007 / CVY-010 | ENFORCED |
 | The manifest reconciles independent sources             | KeeperHub status ↔ ConvoyRegistry events read from chain ↔ Convoy ledger                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | _manifest export pending_                                                                                                   | CVY-012           | PENDING  |
-| The AI is load-bearing                                  | Ablation harness prints the degradation from removing the Planner / Critic                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | _ablation output pending_                                                                                                   | CVY-016           | PENDING  |
+| The AI is load-bearing                                  | Ablation harness prints the degradation from removing the Planner / Critic. The Planner itself is measured against a labelled fixture committed **before** it ever ran: **29/29 first-pass valid JSON (100%)**, **dependency recall 53/56 = 0.946**, precision 0.981, **zero cycles**, 1/104 trap edges emitted                                                                                                                                                                                                                                               | `tests/fixtures/planner.10run.json` · `tests/fixtures/planner.transcripts/validJson.json` · _ablation output pending_       | CVY-010 / CVY-016 | PARTIAL  |
 
 ## Verified onchain artifacts
 
@@ -62,6 +62,31 @@ Convoy's dispatch.**
 
 The sender is a KeeperHub relay EOA, not the org Turnkey wallet, and this repository does not claim
 otherwise (DEC-009, gap G-30).
+
+## Planner eval
+
+Measured against `tests/fixtures/planner.10run.json` — 10 runs, 48 items, 20 labelled dependency
+edges — using `openai/gpt-oss-20b:free`. **The fixture was committed before the Planner was ever run
+against a model** (`5a09ccc`, ahead of the eval harness), so it cannot have been tuned to the answers.
+
+| Metric                               | Result            | Acceptance |
+| ------------------------------------ | ----------------- | ---------- |
+| First-pass valid JSON                | **29/29 = 100%**  | ≥ 95%      |
+| Dependency recall                    | **53/56 = 0.946** | ≥ 0.9      |
+| Cycles emitted                       | **0**             | 0          |
+| Precision                            | 0.981             | —          |
+| Trap edges emitted                   | 1 / 104           | —          |
+| Plans respecting every labelled edge | **29/29**         | —          |
+
+**All three misses were the same kind of miss**, and it does not change what executes. Where the
+evidence implies `2 after 1 after 0`, the model records those two edges and omits the redundant
+`2 after 0` — one rationale says "and implicitly after price feed", so it read the constraint and
+declined to write it twice. The transitive closure differs; the execution order does not, which is
+why the last row is 29/29 and not 26/29.
+
+Both numbers come from **one** set of 30 live completions (D-032), all committed under
+`tests/fixtures/planner.transcripts/`. CI replays that recording; it does not re-measure, and says so
+in its own output.
 
 ## Ablation results
 

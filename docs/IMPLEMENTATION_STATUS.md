@@ -1,6 +1,6 @@
 # Convoy Implementation Status (updated 2026-08-04)
 
-Overall: **50% (CVY-000…CVY-008 done, GATE 1 PASSED; DEC-001…DEC-010 applied)** Next milestone: **CVY-010 — Planner**
+Overall: **54% (CVY-000…CVY-008, CVY-010 done; GATE 1 PASSED; DEC-001…DEC-010 applied)** Next milestone: **CVY-011 — Critic**
 
 **The submission requirement is provisionally met.** Both contracts are deployed and
 Basescan-verified on Base Sepolia, and `openRun` landed through the org Turnkey wallet:
@@ -24,7 +24,7 @@ target at CVY-019, not the development target.
 | CVY-008   | Orchestrator + RUN/ITEM state machine                       | DONE        | 100 | 3-item batch RECEIVED→SEALED_OK on 84532; DEC-006/007 measured; gap G-29  |
 | CVY-GATE1 | **GATE 1** — thin slice, real tx landed via Convoy          | **PASSED**  | 100 | Called by the operator 2026-08-04                                         |
 | CVY-009   | SSE timeline UI + audit drawer + replay                     | TODO        | 0   | Never cut                                                                 |
-| CVY-010   | Planner + zod schema + repair + eval                        | TODO        | 0   | Recall ≥0.9                                                               |
+| CVY-010   | Planner + zod schema + repair + eval                        | DONE        | 100 | Measured: JSON 29/29, recall 0.946, 0 cycles. D-030/031/032               |
 | CVY-011   | Critic + simulate veto + corroboration                      | TODO        | 0   | Zero false vetoes; never cut                                              |
 | CVY-012   | Manifest exporter: 3-way reconcile + sha256                 | TODO        | 0   |                                                                           |
 | CVY-GATE2 | **GATE 2** — full 12-item run, manifest, DAG                | NOT REACHED | 0   | Fail → freeze P1, cut #2 and #5                                           |
@@ -63,7 +63,7 @@ byte-identical across Solidity and TypeScript.
 **Updated 2026-08-03: the credential block is cleared.** `KEEPERHUB_API_KEY`, `BASE_RPC_URL`,
 `BASE_SEPOLIA_RPC_URL`, `BASE_RPC_URL_FALLBACK`, `ETHERSCAN_API_KEY` and `DEPLOYER_PRIVATE_KEY` are
 all present. CVY-003 is now gated on **CVY-004's write path**, which is engineering work rather than
-operator input. `OPENAI_API_KEY` is still a placeholder, so CVY-010/011 remain blocked.
+operator input. `OPENAI_API_KEY` was a placeholder at the time; it is now live (an OpenRouter key, D-031) and CVY-010 is complete.
 
 ### Buffer exhausted, cut order live (recorded 2026-08-03 at DEC-001)
 
@@ -94,16 +94,16 @@ which is the one schedule pressure it was able to relieve.
 
 All values apply to **Base Sepolia (84532)** per DEC-001.
 
-| Value                   | Chain         | Status      | Notes                                                 |
-| ----------------------- | ------------- | ----------- | ----------------------------------------------------- |
-| `KEEPERHUB_API_KEY`     | 84532         | PRESENT     | org `kh_` key with the Turnkey wallet configured      |
-| `BASE_RPC_URL`          | 84532         | PRESENT     | dedicated Sepolia RPC — never a public one            |
-| `BASE_SEPOLIA_RPC_URL`  | 84532         | PRESENT     | Foundry `--rpc-url base_sepolia`; may be the same URL |
-| `BASE_RPC_URL_FALLBACK` | 84532         | PRESENT     | demo backup path b; must match the primary chain      |
-| `ETHERSCAN_API_KEY`     | 84532 (+8453) | PRESENT     | single Etherscan **V2** key; covers both chains       |
-| `DEPLOYER_PRIVATE_KEY`  | 84532         | PRESENT     | Foundry deploy only; fund from a Sepolia faucet       |
-| `OPENAI_API_KEY`        | —             | PLACEHOLDER | **still blocking CVY-010 / CVY-011**                  |
-| `BASE_MAINNET_RPC_URL`  | 8453          | UNSET       | **optional**, CVY-019 flip only — leave unset         |
+| Value                   | Chain         | Status  | Notes                                                 |
+| ----------------------- | ------------- | ------- | ----------------------------------------------------- |
+| `KEEPERHUB_API_KEY`     | 84532         | PRESENT | org `kh_` key with the Turnkey wallet configured      |
+| `BASE_RPC_URL`          | 84532         | PRESENT | dedicated Sepolia RPC — never a public one            |
+| `BASE_SEPOLIA_RPC_URL`  | 84532         | PRESENT | Foundry `--rpc-url base_sepolia`; may be the same URL |
+| `BASE_RPC_URL_FALLBACK` | 84532         | PRESENT | demo backup path b; must match the primary chain      |
+| `ETHERSCAN_API_KEY`     | 84532 (+8453) | PRESENT | single Etherscan **V2** key; covers both chains       |
+| `DEPLOYER_PRIVATE_KEY`  | 84532         | PRESENT | Foundry deploy only; fund from a Sepolia faucet       |
+| `OPENAI_API_KEY`        | —             | LIVE    | OpenRouter key; needs `OPENAI_BASE_URL` (D-031)       |
+| `BASE_MAINNET_RPC_URL`  | 8453          | UNSET   | **optional**, CVY-019 flip only — leave unset         |
 
 Presence is not the same as sufficiency: the org Turnkey wallet must also be **configured for 84532**
 and funded with Base Sepolia ETH. A `422 wallet-not-configured` from KeeperHub means that

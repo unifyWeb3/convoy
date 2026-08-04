@@ -2,7 +2,7 @@
   "name": "convoy",
   "version": "0.0.0",
   "private": true,
-  "description": "Convoy \u2014 autonomous onchain release operator built on KeeperHub",
+  "description": "Convoy — autonomous onchain release operator built on KeeperHub",
   "packageManager": "pnpm@11.2.2",
   "engines": {
     "node": ">=22 <23"
@@ -25,7 +25,9 @@
     "db:seed": "pnpm --filter @convoy/db db:seed",
     "web:dev": "pnpm --filter @convoy/web dev",
     "worker:dev": "pnpm --filter @convoy/worker dev",
-    "ablation": "tsx scripts/ablation.ts"
+    "ablation": "tsx scripts/ablation.ts",
+    "eval:planner": "tsx tests/planner.validJson.eval.ts 3 && tsx tests/planner.recall.eval.ts 3",
+    "eval:planner:replay": "CONVOY_EVAL_REPLAY=tests/fixtures/planner.transcripts/validJson.json CONVOY_EVAL_PACE_MS=0 pnpm run eval:planner"
   },
   "dependencies": {
     "@convoy/db": "workspace:*",
@@ -39,6 +41,8 @@
     "prettier": "^3.4.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "viem": "^2.55.10",
+    "vitest": "^2.1.8",
+    "zod": "^3.25.76"
   }
 }

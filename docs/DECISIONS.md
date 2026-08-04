@@ -561,3 +561,62 @@ could disagree with its own rows. `attempts.gas_used_wei` now holds the real tot
 **Rows written before this entry hold gas UNITS in `gas_used_wei`, and are NOT migrated.**
 Back-filling would require re-reading every receipt and would silently rewrite evidence already cited
 in the CVY-007 and CVY-008 milestone reports. `sponsored IS NULL` identifies those rows exactly.
+
+---
+
+**D-030 2026-08-04: the worker does NOT import the Planner. The boundary between them is
+`runs.plan`, not a module.**
+
+The frozen file layout puts the Planner in `apps/web/lib/planner` (blueprint §612, CVY-010 card).
+The worker compiles with `rootDir: src`, so a direct import fails — **measured, not assumed**:
+
+```
+src/__probe.ts(1,29): error TS6059: File 'apps/web/lib/planner/index.ts' is not under
+rootDir 'services/worker/src'. 'rootDir' is expected to contain all source files.
+```
+
+Rather than widen `rootDir`, extract a fourth package, or move the Planner out of its frozen
+location, the plan travels through the ledger: whoever creates a run writes the validated plan to
+`runs.plan`, and `phasePlan` consumes it.
+
+**This is the right dependency direction independently of the tsconfig.** The worker must never need
+an LLM to execute a run. If it imported the Planner, an unavailable model would be a failure in the
+execution path; as it stands, a missing plan degrades to the deterministic topological order — the
+same code path as `--ablate-planner` — and the run proceeds. The one duplicated thing is the plan's
+shape, read defensively in `readStoredPlan`: `runs.plan` is jsonb and can hold anything, including a
+plan written by an older build, so anything unrecognised is treated as absent.
+
+---
+
+**D-031 2026-08-04: `OPENAI_API_KEY` names the variable, not the vendor. The provider is
+configurable and is currently OpenRouter.**
+
+The frozen blueprint §11 environment table names the variable `OPENAI_API_KEY`, so the name stays.
+The credential supplied for CVY-010 is an OpenRouter key (`sk-or-v1-…`), which requires
+`OPENAI_BASE_URL=https://openrouter.ai/api/v1`. Both variables are documented in `.env.example`
+together, because a key/base-URL mismatch produces a 401 that names the _wrong_ provider —
+`api.openai.com` reporting "Incorrect API key provided: sk-or-v1…" — which is a genuinely confusing
+five minutes.
+
+`CONVOY_LLM_MODEL` selects the model and must be one supporting structured outputs
+(`response_format: {type:"json_schema", strict:true}`). Measured working: `openai/gpt-oss-20b:free`.
+
+**The evals do not depend on this provider staying available.** They replay a committed transcript
+in CI; a live re-measurement is what an operator runs when the model or provider changes.
+
+---
+
+**D-032 2026-08-04: CVY-010's acceptance numbers come from ONE set of 30 live completions, measured
+twice, and CI replays that recording rather than re-measuring.**
+
+Both eval scripts exist as the card requires, but running each live would double the spend and
+produce two numbers from two different samples that could not be compared. Instead
+`planner.validJson.eval.ts` ran live (10 runs × 3 trials = 30 completions, recording every one) and
+`planner.recall.eval.ts` replayed the same recording. **Both numbers describe the same 30
+completions.** CI replays both. The transcripts are committed, so the numbers are checkable rather
+than merely reported.
+
+One completion failed at the transport layer and is excluded from both denominators, reported on its
+own line as `unreachable`. A dropped connection is not a model that cannot produce JSON, and counting
+it as one would be wrong in the flattering direction for the _next_ run and the unflattering
+direction for this one — so it is neither counted nor hidden.

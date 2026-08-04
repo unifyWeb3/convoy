@@ -184,36 +184,166 @@ export async function phaseOpen(
 /**
  * PLANNING → CRITIQUING.
  *
- * INTERIM (D-029): the plan is the seeded item order and its declared
- * `dependsOn` edges. CVY-010 replaces this with the LLM Planner; what it writes
- * to `runs.plan` has the same shape.
+ * **The worker does not call the Planner** (D-030). The Planner lives in
+ * `apps/web/lib/planner` per the frozen file layout, and the worker compiles
+ * with `rootDir: src` — a direct import fails with TS6059, measured. So the
+ * boundary is the ledger, not a module: whoever creates the run writes the
+ * validated plan to `runs.plan`, and this phase consumes it.
+ *
+ * That is also the honest dependency direction. The worker must not need an LLM
+ * to execute a run; if it did, an unavailable model would stop execution rather
+ * than degrading it.
+ *
+ * With no stored plan, the deterministic topological order from the declared
+ * `dependsOn` edges is used — the same path as `--ablate-planner`.
  */
 export async function phasePlan(runId: string): Promise<void> {
+  const run = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
   const items = await prisma.item.findMany({ where: { runId }, orderBy: { idx: 'asc' } });
-  const plan = {
-    source: 'hardcoded (interim, D-029 — LLM Planner lands at CVY-010)',
+
+  const stored = readStoredPlan(run.plan);
+  const deferralsByIdx = new Map<number, number[]>();
+  if (stored !== undefined) {
+    for (const d of stored.deferrals) {
+      const list = deferralsByIdx.get(d.idx);
+      if (list === undefined) deferralsByIdx.set(d.idx, [d.dependsOn]);
+      else list.push(d.dependsOn);
+    }
+  } else {
+    for (const item of items) {
+      if (item.dependsOn.length > 0) deferralsByIdx.set(item.idx, [...item.dependsOn]);
+    }
+  }
+
+  const excluded = new Set(stored?.excludedIdx ?? []);
+  const plan = stored ?? {
+    source: 'fallback-topological',
     order: items.map((i) => i.idx),
-    deferrals: items
-      .filter((i) => i.dependsOn.length > 0)
-      .map((i) => ({ idx: i.idx, untilItems: i.dependsOn })),
+    deferrals: [...deferralsByIdx.entries()].flatMap(([idx, deps]) =>
+      deps.map((dependsOn) => ({ idx, dependsOn })),
+    ),
+    warnings: ['no stored plan; deterministic order from declared dependsOn edges'],
+    excludedIdx: [],
   };
 
   await prisma.$transaction([
-    prisma.run.update({ where: { id: runId }, data: { plan, status: 'CRITIQUING' } }),
-    prisma.event.create({ data: { runId, itemIdx: null, type: 'PLAN_READY', payload: plan } }),
+    prisma.run.update({
+      where: { id: runId },
+      data: { plan: plan as unknown as Prisma.InputJsonValue, status: 'CRITIQUING' },
+    }),
+    prisma.event.create({
+      data: {
+        runId,
+        itemIdx: null,
+        type: 'PLAN_READY',
+        payload: plan as unknown as Prisma.InputJsonValue,
+      },
+    }),
   ]);
 
+  // Persist the Planner's dependency extraction onto the items, so the deferral
+  // gate and the DAG view read one source of truth rather than two.
+  if (stored !== undefined) {
+    for (const item of items) {
+      const deps = deferralsByIdx.get(item.idx) ?? [];
+      const allocation = stored.gasBudgetPerItem.find((g) => g.idx === item.idx);
+      await prisma.item.update({
+        where: { runId_idx: { runId, idx: item.idx } },
+        data: {
+          dependsOn: deps,
+          ...(allocation === undefined
+            ? {}
+            : { gasBudgetUsdc: new Prisma.Decimal(allocation.gasBudgetUsdc) }),
+        },
+      });
+    }
+  }
+
   for (const item of items) {
-    const deferred = item.dependsOn.length > 0;
+    // An excluded item never reaches the Critic as a normal candidate: its
+    // target was not whitelisted for this run, which is an automatic
+    // VETO(evidence_mismatch) and never an execution.
+    if (excluded.has(item.idx)) {
+      await transitionItem({
+        runId,
+        itemIdx: item.idx,
+        expect: ['PENDING'],
+        to: 'VETOED',
+        type: 'ITEM_VETOED',
+        payload: {
+          reason: 'evidence_mismatch',
+          detail: 'target not in the run whitelist',
+          gasSpent: 0,
+        },
+        data: { vetoReason: 'evidence_mismatch' },
+      });
+      continue;
+    }
+    const deferred = (deferralsByIdx.get(item.idx) ?? []).length > 0;
     await transitionItem({
       runId,
       itemIdx: item.idx,
       expect: ['PENDING'],
       to: deferred ? 'DEFERRED' : 'PLANNED',
       type: deferred ? 'ITEM_DEFERRED' : 'PLAN_READY',
-      payload: deferred ? { dependsOn: item.dependsOn } : { idx: item.idx },
+      payload: deferred ? { dependsOn: deferralsByIdx.get(item.idx) ?? [] } : { idx: item.idx },
     });
   }
+}
+
+/** Shape of `runs.plan` as the Planner writes it. Duplicated, not imported (D-030). */
+interface StoredPlanShape {
+  readonly source: string;
+  readonly order: readonly number[];
+  readonly deferrals: readonly { idx: number; dependsOn: number }[];
+  readonly gasBudgetPerItem: readonly { idx: number; gasBudgetUsdc: string }[];
+  readonly excludedIdx: readonly number[];
+  readonly warnings: readonly string[];
+}
+
+/**
+ * Read a stored plan, defensively.
+ *
+ * `runs.plan` is jsonb: it can hold anything, including a plan written by an
+ * older build. Anything that does not match the expected shape is treated as
+ * absent, which degrades to the deterministic order rather than throwing
+ * mid-run.
+ */
+function readStoredPlan(value: unknown): StoredPlanShape | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const p = value as Record<string, unknown>;
+  if (typeof p['source'] !== 'string') return undefined;
+  if (!Array.isArray(p['order']) || !Array.isArray(p['deferrals'])) return undefined;
+
+  const deferrals = (p['deferrals'] as unknown[]).filter(
+    (d): d is { idx: number; dependsOn: number } =>
+      d !== null &&
+      typeof d === 'object' &&
+      Number.isInteger((d as { idx?: unknown }).idx) &&
+      Number.isInteger((d as { dependsOn?: unknown }).dependsOn),
+  );
+  const gasBudgetPerItem = (
+    Array.isArray(p['gasBudgetPerItem']) ? p['gasBudgetPerItem'] : []
+  ).filter(
+    (g): g is { idx: number; gasBudgetUsdc: string } =>
+      g !== null &&
+      typeof g === 'object' &&
+      Number.isInteger((g as { idx?: unknown }).idx) &&
+      typeof (g as { gasBudgetUsdc?: unknown }).gasBudgetUsdc === 'string',
+  );
+
+  return {
+    source: p['source'],
+    order: (p['order'] as unknown[]).filter((i): i is number => Number.isInteger(i)),
+    deferrals,
+    gasBudgetPerItem,
+    excludedIdx: (Array.isArray(p['excludedIdx']) ? p['excludedIdx'] : []).filter(
+      (i): i is number => Number.isInteger(i),
+    ),
+    warnings: (Array.isArray(p['warnings']) ? p['warnings'] : []).filter(
+      (w): w is string => typeof w === 'string',
+    ),
+  };
 }
 
 export interface CritiqueVerdict {

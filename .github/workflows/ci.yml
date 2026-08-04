@@ -123,6 +123,18 @@ jobs:
       - name: Test
         run: pnpm -r test
 
+      # The Planner evals REPLAY a recorded live measurement (CVY-010). CI has no
+      # LLM credential and must not acquire one — a run that silently skipped
+      # would print green, so the harness exits nonzero when it cannot measure,
+      # and the committed transcript is what it measures here.
+      - name: Planner evals (replay)
+        env:
+          CONVOY_EVAL_REPLAY: tests/fixtures/planner.transcripts/validJson.json
+          CONVOY_EVAL_PACE_MS: '0'
+        run: |
+          pnpm tsx tests/planner.validJson.eval.ts 3
+          pnpm tsx tests/planner.recall.eval.ts 3
+
   contracts:
     name: Contracts
     uses: ./.github/workflows/contracts.yml

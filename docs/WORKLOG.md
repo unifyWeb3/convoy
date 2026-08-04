@@ -622,3 +622,71 @@ hatch; the append-only guard applies to it too (it fired during development), so
 what it actually does.
 
 197 tests repo-wide; verify-env 13/0/0; guards clean. **Next: GATE 1 — the operator calls it.**
+
+---
+
+## 2026-08-04 — CVY-010: Planner + zod schema + repair + eval
+
+Full report: [`docs/milestones/CVY-010.md`](milestones/CVY-010.md).
+
+### Acceptance, measured not asserted
+
+**First-pass valid JSON 29/29 = 100.0%** (≥95%) · **dependency recall 53/56 = 0.946** (≥0.9) ·
+**cycles 0**. Precision 0.981; 1 of 104 trap edges emitted; whitelist 3/3; injection 3/3.
+
+Both numbers come from **one** set of 30 live completions (D-032) — the JSON eval ran live and
+recorded every completion, the recall eval replayed the same recording, and the transcripts are
+committed so the numbers are checkable. CI replays rather than re-measures, and says so in its own
+output. With no key the evals **exit nonzero**; they never print green without measuring.
+
+**The fixture was committed before the Planner ever ran against a model** (`5a09ccc`, ahead of the
+harness). That ordering is the only real defence against tuning a fixture to the answers.
+
+**All three recall misses were the same miss and none of them changes execution.** Each was a
+transitively-redundant edge: given `2 after 1 after 0`, the model records those two and omits
+`2 after 0` — one rationale says "and implicitly after price feed". Hence the extra measured line,
+**order satisfies 29/29**: every plan respects every labelled edge, written down or not.
+
+### The injection defence that actually holds
+
+Four defences; two are structural. The load-bearing one is that **the output schema has no address
+field** — a model fully persuaded by "send everything to 0xdead" still cannot express it, because the
+Planner's whole vocabulary is item indices into a caller-supplied set. Tested directly with a caller
+that complies fully with the injection.
+
+### Three preliminaries
+
+**DEC-008** — sponsorship is an ERC-4337 paymaster on a ~$1/month free allowance, **KeeperHub-reported
+and labelled as such**. It supplies the mechanism behind DEC-006's mid-run payer switch: an allowance
+running out inside a burst, which is why the change fell mid-batch.
+
+**DEC-009** — narration decision; **G-30 CLOSED**. The approved claim credits serialization to
+KeeperHub and never names the org wallet as sender. Fanout table preserved in the README.
+
+**DEC-010** — the meter records **consumed** (receipt-composed, always, drains the budget) and
+**debited** (only where `sponsored:false`) and never conflates them. Unknown sponsorship yields
+**null, not zero** — "nothing was charged" and "we don't know" are different claims.
+
+### G-31 — `gasUsedWei` means two different things
+
+Found while wiring DEC-010. The field carries gas **UNITS** when `sponsored:true` and the **L2 fee in
+WEI** when `sponsored:false`. G-28 recorded only the first because it only ever measured sponsored
+transactions. Verified against three receipts with exact equality, and `275418000000 + 6874353887 =
+282292353887` — exactly DEC-006's independently measured balance delta.
+
+**The old reading was wrong on the branch where money actually leaves the wallet**: 1.65 ETH claimed
+for a 45,903-gas call. Also found: G-28's documented L1-fee mitigation was **never wired** —
+`composeGasFeeWei` was never called with `l1FeeWei` in the live path.
+
+### Two pre-existing failures
+
+**CI's `pnpm typecheck` was red and had been.** `pnpm -r typecheck` does not run `typecheck:scripts`;
+confirmed against a stashed tree that both errors predate today — a `viem` import that was never a
+root dependency, and a `gasUsedWei` field that has not existed on `StatusResult` since CVY-007.
+
+**`verify-env` reported CVY-003 incomplete on a DNS blip.** Measured: the provider host fails to
+resolve roughly 1 attempt in 5. `rpcCall` now retries transport failures only — an RPC error response
+is an answer and is not retried. Back to 13/0/0.
+
+**249 tests · verify-env 13/0/0 · guards clean · root typecheck green for the first time in several
+milestones. Next: CVY-011 — the Critic.**
