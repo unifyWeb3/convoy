@@ -17,8 +17,14 @@ export interface LlmConfig {
   readonly timeoutMs: number;
 }
 
+// The two defaults must be COHERENT. An OpenRouter-namespaced model id against
+// OpenAI's endpoint is a guaranteed 404 for anyone who sets only the key, and
+// documenting the mismatch trap in a comment while shipping it as the default
+// would be the same mistake twice. These are OpenAI's endpoint and an OpenAI
+// model id; the OpenRouter pairing that CVY-010 was measured on is set together
+// in `.env.example`, base URL and model on adjacent lines.
 export const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
-export const DEFAULT_MODEL = 'openai/gpt-oss-20b:free';
+export const DEFAULT_MODEL = 'gpt-4o-mini';
 
 export class LlmUnavailableError extends Error {
   constructor(message: string) {

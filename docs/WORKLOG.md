@@ -688,5 +688,48 @@ root dependency, and a `gasUsedWei` field that has not existed on `StatusResult`
 resolve roughly 1 attempt in 5. `rpcCall` now retries transport failures only — an RPC error response
 is an answer and is not retried. Back to 13/0/0.
 
-**249 tests · verify-env 13/0/0 · guards clean · root typecheck green for the first time in several
-milestones. Next: CVY-011 — the Critic.**
+### An LLM-planned run actually executed
+
+The evals score the Planner's output; they do not show it drives anything. `plannedRun.mjs` clones
+the 3-item fixture with **`dependsOn` stripped to empty** — the ordering exists nowhere but in the
+prose — and the Planner recovered both edges, wrote `runs.plan`, and the worker executed it to
+**SEALED_OK** on 84532. Deferral gate released 1 then 2 in the extracted order. The rationale names
+`RootNotSet()`, the contract's real precondition.
+
+Three earlier attempts hit provider 429s or transport failures, degraded to the deterministic
+fallback, and **exited nonzero rather than report a deterministically-planned run as LLM-planned.**
+
+### The DEC-010 meter, live for the first time
+
+It had shipped on unit tests alone. All three items recorded `feeFromReceipt=true`,
+`l1FeeIncluded=true`, `sponsored=true`; `gas_used_usdc` is populated for the first time in the
+project's history; consumed 0.004236652 USDC against 0.000000000 debited — the two figures separate,
+exactly as DEC-010 specifies. The fees are not round multiples of the gas price, which is the L1
+component visible in the number itself.
+
+**An earlier run exposed the real defect:** `readReceiptGas` had no retry, so an RPC blip silently
+dropped to the vendor's L2-only figures (~2.9% understated). It now retries with backoff and
+alternates both RPC URLs — though both currently point at the same host, so that redundancy is
+nominal until the config changes.
+
+Also found and recorded, not fixed: `phaseSeal` has no retry, so one run reached all items LANDED and
+then sat at `SEALING` after a transport failure. That belongs to CVY-015's crash-resume.
+
+### phasePlan can no longer LOSE a constraint
+
+Caught in review: `phasePlan` overwrote `item.dependsOn` with the Planner's extraction. Since the
+model demonstrably omits transitively-redundant edges, and `releaseDeferred` reads `dependsOn`, an
+LLM could silently drop a declared safety constraint. **Declared edges are now authoritative and the
+Planner may only ADD.** The union is cycle-checked — two individually-acyclic sets can union into a
+cycle — and the declared set wins on conflict. 13 new worker tests, none of which existed before.
+
+### One flake, recorded rather than rerun away (G-32)
+
+`schema.migrate.test.ts` "the five frozen tables exist" failed twice under `pnpm -r test` and passed
+on every rerun and in isolation. `pnpm -r test` runs packages in parallel and `@convoy/db` and
+`@convoy/worker` now drive the same Postgres, so a race or pool exhaustion is the leading
+hypothesis — **untested, and not claimed.** Three consecutive green full-suite runs do not settle it.
+Open for investigation before GATE 2, because a flaky gate trains a reader to rerun until green.
+
+**262 tests · Foundry 45 · verify-env 13/0/0 · guards clean · `--frozen-lockfile` clean · root
+typecheck green for the first time in several milestones. Next: CVY-011 — the Critic.**

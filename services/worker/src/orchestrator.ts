@@ -202,28 +202,63 @@ export async function phasePlan(runId: string): Promise<void> {
   const items = await prisma.item.findMany({ where: { runId }, orderBy: { idx: 'asc' } });
 
   const stored = readStoredPlan(run.plan);
+
+  // THE DECLARED EDGES ARE AUTHORITATIVE. The Planner may ADD constraints it
+  // read out of the evidence; it may never remove one the operator declared.
+  //
+  // This is not hypothetical. CVY-010 measured that the model omits
+  // transitively-redundant edges — given `2 after 1 after 0` it records those
+  // two and drops `2 after 0`. Harmless when the rest of the extraction is
+  // right; not harmless if it drops an edge nothing else implies, because
+  // `releaseDeferred` reads `item.dependsOn` and the constraint would simply be
+  // gone. Overwriting would let the LLM lose safety constraints silently, in the
+  // one direction that matters.
+  const declared = edgesFromItems(items);
+  const plannerEdges = stored?.deferrals ?? [];
+  const union = unionEdges(declared, plannerEdges);
+
+  // Two individually-acyclic edge sets CAN union into a cycle (declared `1←0`
+  // plus planner `0←1`). A cycle would deadlock the deferral gate silently, so
+  // the union is checked and the declared set — the operator's — wins.
+  const conflict = findCycleEdges(union);
+  const effective = conflict === undefined ? union : declared;
+  const effectiveWarnings =
+    conflict === undefined
+      ? []
+      : [
+          `planner deferrals conflict with the declared edges (cycle ${conflict.join(' → ')}); ` +
+            'using the declared edges only',
+        ];
+
   const deferralsByIdx = new Map<number, number[]>();
-  if (stored !== undefined) {
-    for (const d of stored.deferrals) {
-      const list = deferralsByIdx.get(d.idx);
-      if (list === undefined) deferralsByIdx.set(d.idx, [d.dependsOn]);
-      else list.push(d.dependsOn);
-    }
-  } else {
-    for (const item of items) {
-      if (item.dependsOn.length > 0) deferralsByIdx.set(item.idx, [...item.dependsOn]);
-    }
+  for (const e of effective) {
+    const list = deferralsByIdx.get(e.idx);
+    if (list === undefined) deferralsByIdx.set(e.idx, [e.dependsOn]);
+    else list.push(e.dependsOn);
   }
 
   const excluded = new Set(stored?.excludedIdx ?? []);
-  const plan = stored ?? {
-    source: 'fallback-topological',
-    order: items.map((i) => i.idx),
-    deferrals: [...deferralsByIdx.entries()].flatMap(([idx, deps]) =>
-      deps.map((dependsOn) => ({ idx, dependsOn })),
-    ),
-    warnings: ['no stored plan; deterministic order from declared dependsOn edges'],
-    excludedIdx: [],
+
+  // What is stored is what was EFFECTIVE, not what the Planner proposed. A plan
+  // whose edges were overridden must not be recorded as if it had been used.
+  const plan = {
+    source: stored?.source ?? 'fallback-topological',
+    order: stored?.order ?? items.map((i) => i.idx),
+    deferrals: effective,
+    ...(stored === undefined
+      ? {}
+      : {
+          gasBudgetPerItem: stored.gasBudgetPerItem,
+          plannerDeferrals: plannerEdges,
+          declaredDeferrals: declared,
+        }),
+    warnings: [
+      ...(stored?.warnings ?? [
+        'no stored plan; deterministic order from declared dependsOn edges',
+      ]),
+      ...effectiveWarnings,
+    ],
+    excludedIdx: stored?.excludedIdx ?? [],
   };
 
   await prisma.$transaction([
@@ -241,8 +276,8 @@ export async function phasePlan(runId: string): Promise<void> {
     }),
   ]);
 
-  // Persist the Planner's dependency extraction onto the items, so the deferral
-  // gate and the DAG view read one source of truth rather than two.
+  // Persist the effective edges onto the items, so the deferral gate and the DAG
+  // view read one source of truth rather than two.
   if (stored !== undefined) {
     for (const item of items) {
       const deps = deferralsByIdx.get(item.idx) ?? [];
@@ -291,8 +326,74 @@ export async function phasePlan(runId: string): Promise<void> {
   }
 }
 
+export interface PlanEdge {
+  readonly idx: number;
+  readonly dependsOn: number;
+}
+
+/** Declared edges, straight off the items. */
+export function edgesFromItems(
+  items: readonly { idx: number; dependsOn: readonly number[] }[],
+): PlanEdge[] {
+  return items.flatMap((i) => i.dependsOn.map((dependsOn) => ({ idx: i.idx, dependsOn })));
+}
+
+/** Union, de-duplicated, deterministically ordered. */
+export function unionEdges(a: readonly PlanEdge[], b: readonly PlanEdge[]): PlanEdge[] {
+  const seen = new Set<string>();
+  const out: PlanEdge[] = [];
+  for (const e of [...a, ...b]) {
+    const key = `${e.idx}<-${e.dependsOn}`;
+    if (seen.has(key) || e.idx === e.dependsOn) continue;
+    seen.add(key);
+    out.push(e);
+  }
+  return out.sort((x, y) => x.idx - y.idx || x.dependsOn - y.dependsOn);
+}
+
+/**
+ * Find a cycle in an edge set, naming it.
+ *
+ * Duplicated from the Planner rather than imported, for the reason in D-030 —
+ * the worker cannot reach `apps/web/lib`. Small, pure, and covered by its own
+ * tests on both sides.
+ */
+export function findCycleEdges(edges: readonly PlanEdge[]): number[] | undefined {
+  const adj = new Map<number, number[]>();
+  for (const e of edges) {
+    const list = adj.get(e.idx);
+    if (list === undefined) adj.set(e.idx, [e.dependsOn]);
+    else list.push(e.dependsOn);
+  }
+  const VISITING = 1;
+  const DONE = 2;
+  const mark = new Map<number, number>();
+  const stack: number[] = [];
+
+  function visit(node: number): number[] | undefined {
+    const state = mark.get(node);
+    if (state === DONE) return undefined;
+    if (state === VISITING) return [...stack.slice(stack.indexOf(node)), node];
+    mark.set(node, VISITING);
+    stack.push(node);
+    for (const next of adj.get(node) ?? []) {
+      const cycle = visit(next);
+      if (cycle !== undefined) return cycle;
+    }
+    stack.pop();
+    mark.set(node, DONE);
+    return undefined;
+  }
+
+  for (const node of [...adj.keys()]) {
+    const cycle = visit(node);
+    if (cycle !== undefined) return cycle;
+  }
+  return undefined;
+}
+
 /** Shape of `runs.plan` as the Planner writes it. Duplicated, not imported (D-030). */
-interface StoredPlanShape {
+export interface StoredPlanShape {
   readonly source: string;
   readonly order: readonly number[];
   readonly deferrals: readonly { idx: number; dependsOn: number }[];
@@ -309,7 +410,7 @@ interface StoredPlanShape {
  * absent, which degrades to the deterministic order rather than throwing
  * mid-run.
  */
-function readStoredPlan(value: unknown): StoredPlanShape | undefined {
+export function readStoredPlan(value: unknown): StoredPlanShape | undefined {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const p = value as Record<string, unknown>;
   if (typeof p['source'] !== 'string') return undefined;
