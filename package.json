@@ -28,6 +28,7 @@
     "ablation": "tsx scripts/ablation.ts"
   },
   "dependencies": {
+    "@convoy/db": "workspace:*",
     "@convoy/kh-client": "workspace:*"
   },
   "devDependencies": {

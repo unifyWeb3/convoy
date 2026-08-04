@@ -1,6 +1,6 @@
 # Convoy Implementation Status (updated 2026-08-03)
 
-Overall: **25% (CVY-000…CVY-004 done; DEC-001 applied)** Next milestone: **CVY-005 — DB package: Prisma schema, migrations, seed**
+Overall: **30% (CVY-000…CVY-005 done; DEC-001 applied)** Next milestone: **CVY-006 — BullMQ queue + worker + idempotent handlers**
 
 **The submission requirement is provisionally met.** Both contracts are deployed and
 Basescan-verified on Base Sepolia, and `openRun` landed through the org Turnkey wallet:

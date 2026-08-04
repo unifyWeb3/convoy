@@ -367,3 +367,75 @@ resolving it by luck of tsx's static-import handling, and a dynamic import faile
 `workspace:*` so both `first-tx.ts` and `verify-env.ts` resolve deterministically.
 
 `scripts/verify-env.ts`: **11 passed · 2 expected-fail (CVY-005) · 0 blocking.**
+
+---
+
+## CVY-005 — 2026-08-04 — DB package: Prisma schema, migrations, seed
+
+The five frozen models from ARCHITECTURE §5(g) — `runs`, `items`, `attempts`, `events`, `manifests` —
+migrated to Postgres 16, seeded with both fixtures, consumed cleanly by web and worker. **35 tests.**
+
+`scripts/verify-env.ts` now reports **13 passed · 0 expected-fail · 0 blocking** — the first fully
+green matrix in the project.
+
+**The schema is verified by reading `information_schema`, not `schema.prisma` (D-025).** The prisma
+file is what we asked for; the applied database is what we got, and only the second is evidence. The
+tests read column types, precisions, nullability and index definitions back out of Postgres and
+compare them to the frozen block: every USDC column is `numeric(20,6)`, `gas_used_wei` is
+unconstrained `numeric` (wei does not fit in 20 digits), the five bytea columns are bytea, the four
+jsonb columns are jsonb, `events.id` is bigint. The `(run_id, idx)` unique constraint additionally
+gets a **behavioural** test — inserting a duplicate must reject — because an index that exists and an
+index that bites are different claims.
+
+**`events` append-only is enforced at runtime, not only in types (D-024).** A types-only restriction
+is one `as any` from being ignored, and the cost is severe: `events.id` is the SSE event id a browser
+returns as `Last-Event-ID`, so mutating or deleting a row silently corrupts every client replaying
+from that point. `ConvoyDb` narrows the type **and** a Prisma extension throws
+`AppendOnlyViolationError` on update/updateMany/upsert/delete/deleteMany. Five tests call each
+forbidden op through a cast that defeats the types and assert it still throws.
+
+**Seed fixtures compute `payloadHash` rather than hardcoding it (D-027)** — a hardcoded hash stops
+tracking the encoding the moment either side moves, the same failure D-023 recorded for selectors.
+`seed.fixtures.test.ts` recomputes it independently from the stored target/function/args/idx rather
+than asserting a literal. The 12-item fixture carries two **genuinely invalid** items — a duplicate
+`enableMarket` and a second `setRoot` — whose reverts (`MarketAlreadyEnabled()`, `RootAlreadySet()`)
+come from the contract's own preconditions. Nothing is staged, and neither fixture carries a
+transaction hash, because nothing has executed.
+
+**Three problems found by running the gate rather than by reading code:**
+
+1. **The db suite passed only in my shell.** `pnpm -r test` failed 25 of 35 because `DATABASE_URL`
+   was exported by hand. A suite that depends on the operator's environment is not a gate; it now
+   loads the root `.env` in `test/setup.ts` and throws a specific message if the database is absent.
+   `fileParallelism: false` because both files share one database and would race on fixture rows.
+2. **`allowBuilds` had placeholder values.** pnpm had written `set this to true or false` into
+   `pnpm-workspace.yaml` for the three Prisma packages. Set explicitly, with the reasoning recorded
+   (D-026): each entry allows arbitrary install-time code, so it is a decision, not a convenience.
+3. **`verify-env`'s Prisma row was stale.** It probed `@prisma/client` from the repo root, where it
+   is not resolvable, so it reported FAIL against a perfectly generated client. It now imports
+   `@convoy/db` and runs a real query — what an actual consumer does.
+
+Decisions D-024…D-027. **Next: CVY-006.**
+
+### KeeperHub Claude Code plugin — measured live (G-25 CLOSED)
+
+The operator installed and authenticated it; measured and diffed against the manifest inspected
+earlier. Three findings:
+
+- **The manifest cannot tell you what the server exposes.** It declares a URL; the tool list
+  (`list_workflows`, `execute_contract_call`, `create_workflow`, `delete_workflow`, …) is served at
+  connect time.
+- **Zero KeeperHub tools reach a non-interactive agent session.** `ToolSearch("+keeperhub")` returns
+  no matches here. The plugin extends the _interactive_ surface only — the clearest possible argument
+  for the runtime staying on Bearer.
+- **It adds no execution capability.** Same endpoint, same org: a different door to the same room.
+
+The plugin is now named in the README surfaces list, because it was genuinely used — the org wallet
+integration was inspected through it.
+
+**`isManaged: false` settled with evidence, not a guess.** The concern was that it might mean "not
+provisioned" and produce a 422 fatal-to-run mid-demo. The registry's stored operator for the CVY-003
+transaction reads `0x65F5AFd3b4d5F7d58C408300569a11f0EC190Da6` — byte-identical to the wallet MCP
+reports, and that address was `msg.sender` in a real Basescan-verified transaction. `verify-env` runs
+a live simulate on every invocation reporting the same sender, with no 422 ever observed. The flag
+means "externally-added address", not "unprovisioned".

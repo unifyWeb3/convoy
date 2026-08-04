@@ -1,9 +1,18 @@
-// Convoy ledger schema.
+// Convoy ledger schema — the five frozen models from docs/ARCHITECTURE.md §5(g).
 //
-// Scaffold only. The five frozen models — runs, items, attempts, events,
-// manifests — are implemented in CVY-005 exactly as specified in
-// docs/ARCHITECTURE.md §5(g): bytea -> Bytes, numeric(20,6) -> Decimal,
-// jsonb -> Json, events.id as bigserial (the SSE event id).
+// This is Convoy's ledger of record and the third leg of the manifest's
+// three-way reconciliation (KeeperHub status <-> ConvoyRegistry events <-> here).
+//
+// Type mapping, fixed by the frozen design:
+//   bytea         -> Bytes
+//   numeric(20,6) -> Decimal @db.Decimal(20, 6)   <- money, NEVER a float
+//   numeric       -> Decimal @db.Decimal          <- wei, unconstrained precision
+//   jsonb         -> Json    @db.JsonB
+//   timestamptz   -> DateTime @db.Timestamptz(6)
+//   bigserial     -> BigInt  @default(autoincrement())
+//
+// SQL table and column names are preserved with @map/@@map so the deployed
+// schema matches the frozen block literally; Prisma field names are camelCase.
 
 generator client {
   provider = "prisma-client-js"
@@ -12,4 +21,129 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+/// One batch of interdependent onchain operations.
+model Run {
+  id String @id @default(uuid()) @db.Uuid
+
+  /// The bytes32 runId committed onchain by ConvoyRegistry.openRun.
+  /// Unique: a run is opened exactly once, and this is the join key to the
+  /// manifest's onchain leg. Null until openRun lands.
+  runIdOnchain Bytes? @unique @map("run_id_onchain")
+  status       String
+
+  budgetUsdc   Decimal @map("budget_usdc") @db.Decimal(20, 6)
+  spentGasUsdc Decimal @default(0) @map("spent_gas_usdc") @db.Decimal(20, 6)
+  spentPayUsdc Decimal @default(0) @map("spent_pay_usdc") @db.Decimal(20, 6)
+
+  /// ETH/USD frozen at run open. Gas -> USDC accounting is reproducible only if
+  /// the rate used is stored with the run (gap G-04); on Base Sepolia the USD
+  /// figure is notional (gap G-18).
+  runEthUsd Decimal @map("run_eth_usd") @db.Decimal(20, 6)
+
+  deadline DateTime? @db.Timestamptz(6)
+
+  /// Planner output: order, deferrals, per-item gas budget, rationale.
+  plan      Json?     @db.JsonB
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  sealedAt  DateTime? @map("sealed_at") @db.Timestamptz(6)
+
+  items    Item[]
+  events   Event[]
+  manifest Manifest?
+
+  @@map("runs")
+}
+
+/// One onchain operation within a run.
+model Item {
+  id    String @id @default(uuid()) @db.Uuid
+  runId String @map("run_id") @db.Uuid
+  idx   Int
+
+  targetAddr   Bytes  @map("target_addr")
+  functionName String @map("function_name")
+  functionArgs Json   @map("function_args") @db.JsonB
+
+  /// keccak256(abi.encode(target, fn, args, idx)) — proven byte-identical
+  /// across Solidity and TypeScript at CVY-002.
+  payloadHash Bytes  @map("payload_hash")
+  evidence    String
+  state       String
+
+  /// Item indices this one depends on, within the same run.
+  dependsOn     Int[]    @default([]) @map("depends_on")
+  gasBudgetUsdc Decimal? @map("gas_budget_usdc") @db.Decimal(20, 6)
+  vetoReason    String?  @map("veto_reason")
+
+  run      Run       @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attempts Attempt[]
+
+  @@unique([runId, idx])
+  @@map("items")
+}
+
+/// One attempt at one phase of one item. Retries append; they never overwrite.
+model Attempt {
+  id        String @id @default(uuid()) @db.Uuid
+  itemId    String @map("item_id") @db.Uuid
+  attemptNo Int    @map("attempt_no")
+
+  /// SIMULATE | COMMIT | EXECUTE
+  kind String
+
+  executionId String? @map("execution_id")
+  txHash      Bytes?  @map("tx_hash")
+  txLink      String? @map("tx_link")
+
+  /// Wei — unconstrained numeric, never a float and never a JS number.
+  gasUsedWei  Decimal? @map("gas_used_wei") @db.Decimal
+  gasUsedUsdc Decimal? @map("gas_used_usdc") @db.Decimal(20, 6)
+
+  /// Critic evidence, straight from KeeperHub's simulate response.
+  wouldRevert  Boolean? @map("would_revert")
+  revertReason String?  @map("revert_reason")
+
+  khStatus  String?  @map("kh_status")
+  errorCode String?  @map("error_code")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  item Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId, attemptNo])
+  @@map("attempts")
+}
+
+/// Append-only event log. Never updated, never deleted.
+///
+/// `id` is bigserial precisely because it is the SSE event id: the browser sends
+/// it back as `Last-Event-ID` and the server replays everything after it
+/// (blueprint A6). A non-monotonic id would break replay, which is what makes
+/// the timeline survive a refresh mid-demo.
+model Event {
+  id      BigInt @id @default(autoincrement())
+  runId   String @map("run_id") @db.Uuid
+  itemIdx Int?   @map("item_idx")
+
+  type    String
+  payload Json     @db.JsonB
+  at      DateTime @default(now()) @db.Timestamptz(6)
+
+  run Run @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, at])
+  @@map("events")
+}
+
+/// The exported, sha256-stamped reconciliation for a run. One per run.
+model Manifest {
+  runId      String   @id @map("run_id") @db.Uuid
+  json       Json     @db.JsonB
+  sha256     Bytes
+  exportedAt DateTime @default(now()) @map("exported_at") @db.Timestamptz(6)
+
+  run Run @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@map("manifests")
 }

@@ -14,11 +14,22 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src --ext .ts --max-warnings 0 --no-error-on-unmatched-pattern",
+    "lint": "eslint src test prisma --ext .ts --max-warnings 0 --no-error-on-unmatched-pattern",
     "test": "vitest run --passWithNoTests",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts"
+  },
+  "devDependencies": {
+    "prisma": "^5.22.0",
+    "tsx": "^4.23.1"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "viem": "^2.55.10"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   }
 }

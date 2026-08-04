@@ -4,8 +4,9 @@ The test catalog from Implementation Blueprint §9. Rows are implemented by the 
 last column; at CVY-000 the harnesses exist and the suites are empty. As of CVY-001 the three
 contract rows are implemented and green — 45 Foundry tests, invariants at `runs=1000 depth=32`. As
 of CVY-002 the payloadHash-parity row is green too — 47 assertions over 13 dumped fixtures. As of
-CVY-004 the kh-client row is green — 114 tests total in that package, over tapes recorded from the
-live API.
+CVY-004 the kh-client row is green — 118 tests total in that package, over tapes recorded from the
+live API. As of CVY-005 the DB row is green — 35 tests reading the applied schema back out of
+Postgres rather than trusting `schema.prisma`.
 
 ## Catalog
 

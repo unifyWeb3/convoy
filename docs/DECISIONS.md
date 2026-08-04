@@ -258,3 +258,38 @@ The first G-20 measurement used a hand-written constant for `RootNotSet()`. It w
 misreported the verdict as "the API returns no selector" when the API had returned it all along.
 A hardcoded selector is a guess that looks like a fact once it is checked in. Derive them:
 `toFunctionSelector()` in TypeScript, `cast sig` at the terminal.
+
+**D-024 2026-08-04: `events` append-only is enforced at runtime, not only in types.**
+The frozen design says the event log is append-only and that no update or delete path exists in the
+client surface. A types-only restriction is one `as any` from being ignored, and the cost of ignoring
+it is severe: `events.id` is the SSE event id a browser sends back as `Last-Event-ID`, so mutating or
+deleting a row silently corrupts every client replaying from that point and the audit trail stops
+being a record of what happened. `@convoy/db` therefore does both — `ConvoyDb` narrows `event` to
+create/read at the type level, **and** a Prisma client extension throws `AppendOnlyViolationError`
+on `update`/`updateMany`/`upsert`/`delete`/`deleteMany`. Five tests call each forbidden operation
+through a cast that defeats the types, and assert it still throws.
+
+**D-025 2026-08-04: the schema is verified by reading `information_schema`, not `schema.prisma`.**
+`schema.prisma` is what we asked for; the applied database is what we got. Only the second is
+evidence, and the two can diverge whenever a migration is edited, partially applied, or drifts. The
+CVY-005 tests therefore read column types, precisions, nullability and index definitions back out of
+Postgres and compare them to the frozen `docs/ARCHITECTURE.md` §5(g) block. The `(run_id, idx)`
+unique constraint additionally gets a behavioural test — inserting a duplicate must reject — because
+an index that exists and an index that bites are different claims.
+
+**D-026 2026-08-04: Prisma and esbuild are the only packages allowed to run install scripts.**
+`pnpm-workspace.yaml` denies build scripts by default; CVY-000 allowed `esbuild` alone. Prisma's
+query engine is a native binary fetched at install, so `@convoy/db` cannot generate, migrate or seed
+without it, and CVY-005 adds `prisma`, `@prisma/client` and `@prisma/engines` to `allowBuilds`. Each
+entry is a deliberate decision rather than a convenience: an install script runs arbitrary code with
+the developer's environment in scope. pnpm had written placeholder `set this to true or false`
+values into the file; those are now explicit.
+
+**D-027 2026-08-04: seed fixtures compute `payloadHash` rather than hardcoding it.**
+A hardcoded hash in a fixture is a guess that stops tracking the encoding the moment either side
+moves — exactly the failure D-023 recorded for error selectors. The seed computes it with the
+CVY-002 encoding, and `seed.fixtures.test.ts` recomputes it independently from the stored target,
+function, args and idx rather than asserting a literal. The 12-item fixture also carries two
+**genuinely invalid** items (a duplicate `enableMarket` and a second `setRoot`) whose reverts —
+`MarketAlreadyEnabled()` and `RootAlreadySet()` — come from the contract's own preconditions. Nothing
+is staged.

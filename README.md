@@ -53,6 +53,19 @@ Populated by `pnpm tsx scripts/ablation.ts --ablate-planner|--ablate-critic` at 
 | `--ablate-planner` | _pending_        | _pending_         | _pending_    | _pending_          |
 | `--ablate-critic`  | _pending_        | _pending_         | _pending_    | _pending_          |
 
+## KeeperHub surfaces used
+
+| Surface                                          | Auth              | Used for                                                                                                 |
+| ------------------------------------------------ | ----------------- | -------------------------------------------------------------------------------------------------------- |
+| **REST direct execution** (`packages/kh-client`) | `kh_` Bearer      | **All execution.** Every simulate, write and status poll                                                 |
+| **MCP** — KeeperHub Claude Code plugin v4.0.0    | Browser OAuth 2.1 | Installed and authenticated; used to inspect the org wallet integration and confirm the execution wallet |
+
+Both reach `app.keeperhub.com/mcp`; only the credential differs. The plugin is a development and
+evaluation surface — **not a runtime dependency**. The worker and client run unattended with no
+browser to complete a sign-in, so they stay on Bearer auth. Uninstalling the plugin leaves Convoy's
+execution path completely unaffected, which is the test of that boundary.
+Detail: [`.convoy/mcp/README.md`](.convoy/mcp/README.md).
+
 ## What is a demo stand-in
 
 `MockRewardDistributor` is a **demo-only** contract standing in for a real Merkle-drop distributor.
@@ -96,6 +109,7 @@ Requires local Postgres and Redis. Copy `.env.example` to `.env` and fill it in 
 | [`docs/TESTING.md`](docs/TESTING.md)                                     | Test catalog and commands               |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)                               | Deploy and rollback                     |
 | [`docs/RUNBOOK_FIRST_TRANSACTION.md`](docs/RUNBOOK_FIRST_TRANSACTION.md) | **Authority** for deploy + first tx     |
+| [`.convoy/mcp/README.md`](.convoy/mcp/README.md)                         | KeeperHub MCP surfaces and auth paths   |
 | [`docs/AI_WORKFLOW.md`](docs/AI_WORKFLOW.md)                             | Milestone lifecycle and operating rules |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md)                                 | Numbered decision log                   |
 

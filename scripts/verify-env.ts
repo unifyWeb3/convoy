@@ -231,17 +231,22 @@ async function checkRedis(): Promise<Result> {
 
 async function checkPrismaClient(): Promise<Result> {
   try {
-    // Indirect specifier: the module does not exist until CVY-005 generates it,
-    // so it must not be resolved statically at typecheck time.
-    const specifier = '@prisma/client';
-    await import(specifier);
-    return { check: 'Prisma client generated', status: 'PASS', detail: 'import succeeds' };
-  } catch {
+    // Probed through @convoy/db rather than @prisma/client directly: the db
+    // package owns the dependency, and importing it here is what an actual
+    // consumer does. A root-level probe would fail on resolution even with a
+    // perfectly generated client.
+    const { db, EVENT_TYPE } = await import('@convoy/db');
+    const runs = await db.run.count();
+    return {
+      check: 'Prisma client generated',
+      status: 'PASS',
+      detail: `@convoy/db imports and queries; ${runs} run(s), ${EVENT_TYPE.length} event types`,
+    };
+  } catch (e) {
     return {
       check: 'Prisma client generated',
       status: 'FAIL',
-      detail: 'no generated client — @convoy/db schema lands in CVY-005',
-      expectedFrom: 'CVY-005',
+      detail: `@convoy/db import/query failed: ${(e as Error).message.split('\n')[0]}`,
     };
   }
 }
