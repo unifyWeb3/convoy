@@ -43,7 +43,8 @@ export async function getExecutionStatus(
     status,
     transactionHash: s(b['transactionHash']),
     transactionLink: s(b['transactionLink']),
-    gasUsedWei: s(b['gasUsedWei']),
+    gasUsedUnits: s(b['gasUsedWei']),
+    gasPriceWei: s(b['gasPriceWei']),
     // A 0 hint is an explicit terminal signal even if the status string lags.
     terminal: isTerminalStatus(status) || hintMs === 0,
     pollIntervalHintMs: hintMs,
@@ -86,7 +87,8 @@ export async function pollUntilTerminal(
       status: write.status,
       transactionHash: write.transactionHash,
       transactionLink: write.transactionLink,
-      gasUsedWei: write.gasUsedWei,
+      gasUsedUnits: write.gasUsedUnits,
+      gasPriceWei: write.gasPriceWei,
       terminal: true,
       raw: write.raw,
     };

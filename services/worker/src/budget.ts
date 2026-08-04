@@ -1,0 +1,210 @@
+// Budget meter — gas → USDC accounting.
+//
+// The pinned formula (blueprint A5, ARCHITECTURE §5(g)):
+//
+//     gas_used_usdc = (gasUsedWei / 1e18) * runEthUsd
+//
+// with `runEthUsd` frozen into the run at open, so the arithmetic is
+// reproducible from the manifest alone (gap G-04).
+//
+// TWO THINGS ABOUT THAT FORMULA, BOTH MEASURED (gap G-28, gap G-18):
+//
+// 1. `gasUsedWei` in the formula means **wei**. KeeperHub's response field of
+//    the same name carries the receipt's `gasUsed` — gas UNITS. Feeding units
+//    into the formula understates cost by ~6.2 million times. The client now
+//    surfaces `gasUsedUnits` + `gasPriceWei` so the mistake is not reachable;
+//    this module composes the real wei before applying the formula.
+//
+// 2. On Base Sepolia, KeeperHub **sponsors** the transaction: the org wallet's
+//    balance does not move at all. The gas units and the fee in wei are real and
+//    measured; the USD figure is notional at a frozen price; the budget is a
+//    policy limit rather than a claim on a balance. The formula is unchanged.
+
+import { Prisma } from '@convoy/db';
+
+/** A run's budget position at a point in time. */
+export interface BudgetState {
+  readonly budgetUsdc: Prisma.Decimal;
+  readonly spentGasUsdc: Prisma.Decimal;
+  /** Reserved for the x402 leg. Always zero until CVY-017 (gaps G-06, G-17). */
+  readonly spentPayUsdc: Prisma.Decimal;
+}
+
+export const BUDGET_LOW_FRACTION = 0.2;
+
+const WEI_PER_ETH = new Prisma.Decimal('1e18');
+
+function dec(v: Prisma.Decimal | string | bigint | number): Prisma.Decimal {
+  return v instanceof Prisma.Decimal ? v : new Prisma.Decimal(v.toString());
+}
+
+/**
+ * Compose the real fee in wei from what KeeperHub returns plus the receipt's L1
+ * component.
+ *
+ * Base is an OP-stack L2, so the fee has two parts: `units * gasPriceWei`
+ * (L2 execution) and `l1Fee` (data availability). **KeeperHub's status response
+ * carries only the first.** On the CVY-003 transaction the L1 part was
+ * 12,053,372,102 of 422,453,372,102 wei — about 2.9%, far too large to drop.
+ *
+ * `l1Fee` therefore comes from an `eth_getTransactionReceipt` read via
+ * `BASE_RPC_URL` (gap G-28). It is optional here so the meter still produces a
+ * figure when the receipt has not been read yet — but that figure is **L2 only**
+ * and `l1FeeIncluded` says so, rather than quietly under-reporting.
+ */
+export interface GasFee {
+  readonly weiTotal: Prisma.Decimal;
+  readonly weiL2: Prisma.Decimal;
+  readonly weiL1: Prisma.Decimal;
+  readonly l1FeeIncluded: boolean;
+}
+
+export function composeGasFeeWei(input: {
+  gasUsedUnits: Prisma.Decimal | string | bigint;
+  gasPriceWei: Prisma.Decimal | string | bigint;
+  l1FeeWei?: Prisma.Decimal | string | bigint;
+}): GasFee {
+  const weiL2 = dec(input.gasUsedUnits).mul(dec(input.gasPriceWei));
+  const included = input.l1FeeWei !== undefined;
+  const weiL1 = included ? dec(input.l1FeeWei as string) : new Prisma.Decimal(0);
+  return { weiTotal: weiL2.add(weiL1), weiL2, weiL1, l1FeeIncluded: included };
+}
+
+/** The pinned formula. `weiTotal` must be real wei, never gas units. */
+export function gasUsdc(
+  weiTotal: Prisma.Decimal | string | bigint,
+  runEthUsd: Prisma.Decimal | string,
+): Prisma.Decimal {
+  return dec(weiTotal).div(WEI_PER_ETH).mul(dec(runEthUsd));
+}
+
+export function totalSpent(state: BudgetState): Prisma.Decimal {
+  return state.spentGasUsdc.add(state.spentPayUsdc);
+}
+
+export function remaining(state: BudgetState): Prisma.Decimal {
+  const left = state.budgetUsdc.sub(totalSpent(state));
+  return left.isNegative() ? new Prisma.Decimal(0) : left;
+}
+
+/** Fraction of budget left, in [0,1]. Zero budget reads as exhausted. */
+export function remainingFraction(state: BudgetState): number {
+  if (state.budgetUsdc.lessThanOrEqualTo(0)) return 0;
+  return remaining(state).div(state.budgetUsdc).toNumber();
+}
+
+export function isExhausted(state: BudgetState): boolean {
+  return remaining(state).lessThanOrEqualTo(0);
+}
+
+/** True at or below 20% remaining — the amber threshold. */
+export function isLow(state: BudgetState): boolean {
+  return remainingFraction(state) <= BUDGET_LOW_FRACTION;
+}
+
+/**
+ * Should this item be attempted?
+ *
+ * `over_budget` is one of the Critic's four frozen veto reasons (§5(d)); this
+ * function supplies the deterministic half of that judgement at CVY-011. The
+ * Critic may still veto for evidence reasons a projection cannot see.
+ */
+export interface Allocation {
+  readonly itemIdx: number;
+  /** Per-item gas budget from the Planner. Null = no allocation was assigned. */
+  readonly gasBudgetUsdc: Prisma.Decimal | null;
+}
+
+export type AffordVerdict =
+  | { readonly verdict: 'affordable'; readonly reason: string }
+  | { readonly verdict: 'over_budget'; readonly reason: string }
+  | { readonly verdict: 'exhausted'; readonly reason: string };
+
+export function canAfford(state: BudgetState, allocation: Allocation): AffordVerdict {
+  const left = remaining(state);
+  if (left.lessThanOrEqualTo(0)) {
+    return {
+      verdict: 'exhausted',
+      reason: `budget exhausted (${state.budgetUsdc.toFixed(6)} USDC spent); item ${allocation.itemIdx} is SKIPPED`,
+    };
+  }
+  if (allocation.gasBudgetUsdc === null) {
+    // No allocation is not a veto — the Planner simply did not assign one.
+    // Treating "unknown" as "over budget" would veto valid items for a missing
+    // number, which is exactly the false veto CVY-011 must never produce.
+    return { verdict: 'affordable', reason: 'no per-item allocation; not a budget veto' };
+  }
+  if (allocation.gasBudgetUsdc.greaterThan(left)) {
+    return {
+      verdict: 'over_budget',
+      reason:
+        `item ${allocation.itemIdx} allocation ${allocation.gasBudgetUsdc.toFixed(6)} USDC ` +
+        `exceeds ${left.toFixed(6)} USDC remaining`,
+    };
+  }
+  return {
+    verdict: 'affordable',
+    reason: `${allocation.gasBudgetUsdc.toFixed(6)} of ${left.toFixed(6)} USDC remaining`,
+  };
+}
+
+/** Applying one landed attempt's real gas to the meter. */
+export interface MeterUpdate {
+  readonly next: BudgetState;
+  readonly gasUsdc: Prisma.Decimal;
+  /** Emit BUDGET_LOW only on the crossing, not on every subsequent update. */
+  readonly crossedLow: boolean;
+  readonly exhausted: boolean;
+}
+
+export function applyGas(
+  state: BudgetState,
+  fee: GasFee,
+  runEthUsd: Prisma.Decimal | string,
+): MeterUpdate {
+  const cost = gasUsdc(fee.weiTotal, runEthUsd);
+  const next: BudgetState = { ...state, spentGasUsdc: state.spentGasUsdc.add(cost) };
+  return {
+    next,
+    gasUsdc: cost,
+    crossedLow: !isLow(state) && isLow(next),
+    exhausted: isExhausted(next),
+  };
+}
+
+/**
+ * Which items are SKIPPED when the budget runs out, and how the run ends.
+ *
+ * `SEALED_PARTIAL` rather than `SEALED_OK`: the run did what it could and the
+ * manifest says so. Ending early is a designed outcome, not a crash — the
+ * frozen §5(i) machine lists `SKIPPED(budget-exhausted)` as a terminal item
+ * state precisely for this.
+ */
+export interface ExhaustionOutcome {
+  readonly skippedIdx: readonly number[];
+  readonly runStatus: 'SEALED_OK' | 'SEALED_PARTIAL';
+  readonly reason: string;
+}
+
+export function planExhaustion(
+  state: BudgetState,
+  unfinishedIdx: readonly number[],
+): ExhaustionOutcome {
+  if (!isExhausted(state) || unfinishedIdx.length === 0) {
+    return {
+      skippedIdx: [],
+      runStatus: unfinishedIdx.length === 0 ? 'SEALED_OK' : 'SEALED_PARTIAL',
+      reason:
+        unfinishedIdx.length === 0
+          ? 'every item reached a terminal state'
+          : `${unfinishedIdx.length} item(s) unfinished`,
+    };
+  }
+  return {
+    skippedIdx: [...unfinishedIdx].sort((a, b) => a - b),
+    runStatus: 'SEALED_PARTIAL',
+    reason:
+      `budget exhausted with ${unfinishedIdx.length} item(s) unattempted; ` +
+      'marked SKIPPED and the run sealed partial',
+  };
+}

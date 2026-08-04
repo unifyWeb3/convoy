@@ -71,7 +71,7 @@ describe('getExecutionStatus', () => {
     expect(urls[0]).toContain('/api/execute/direct_1/status');
     expect(result.status).toBe('completed');
     expect(result.transactionHash).toBe('0xabc');
-    expect(result.gasUsedWei).toBe('31000');
+    expect(result.gasUsedUnits).toBe('31000');
     expect(result.pollIntervalHintMs).toBe(0);
     expect(result.terminal).toBe(true);
   });
@@ -140,7 +140,7 @@ describe('pollUntilTerminal', () => {
 
     expect(calls).toBe(1);
     expect(result.transactionHash).toBe('0x9450');
-    expect(result.gasUsedWei).toBe('74093');
+    expect(result.gasUsedUnits).toBe('74093');
   });
 
   it('short-circuits when the write is terminal AND already carries a hash (gap G-02)', async () => {

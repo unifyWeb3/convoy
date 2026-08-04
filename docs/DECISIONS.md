@@ -356,3 +356,65 @@ The attempt number therefore travels in `job.data` and is fixed when the job is 
 stalled job carries byte-identical data, produces the identical idempotency key, and KeeperHub's
 per-org 24h window collapses it to one execution. A genuine Convoy-side retry enqueues a _new_ job
 with `attempt + 1` and deliberately gets a new key. See gap **G-26**.
+
+**DEC-004 2026-08-04: KeeperHub sponsors execution on Base Sepolia. The org wallet's balance does
+not move, and the budget meter is a policy limit rather than a claim on a balance.**
+
+Measured, not inferred. For the CVY-003 transaction
+`0x1ffb4aaf9525fd68b5d8eabe96d1e99058bbc40f9b0d7f7db102aa0d81b2bbcd` (block 45020292):
+
+| Address                          | Before             | After              | Delta                 |
+| -------------------------------- | ------------------ | ------------------ | --------------------- |
+| Org Turnkey wallet `0x65F5…0Da6` | 100000000000000000 | 100000000000000000 | **0 wei**             |
+| Relay EOA `0x6331…1e99`          | 248376537161491949 | 248376114708119847 | **−422453372102 wei** |
+
+The relay's delta equals `gasUsed × effectiveGasPrice + l1Fee`
+(`68400 × 6000000 + 12053372102 = 422453372102`) **to the wei**, which attributes the payment to this
+transaction rather than to other activity in the same block. The org wallet reads 0.1 ETH at the
+deploy block, at the transaction block, and now: **it has never moved.**
+
+Scope of the claim: sponsorship was observed on 84532 on every write so far (`sponsored: true` on
+both the CVY-004 smoke and CVY-003) — two samples. This confirms sponsorship is _active here_; it
+does not settle policy, and **G-08 still stands: sponsorship is never load-bearing.** The runbook's
+0.02 ETH org-wallet funding threshold therefore **stays**, deliberately, as belt-and-braces against a
+run where sponsorship does not apply.
+
+The design is unchanged. What changes is what the meter can honestly claim — see the widened G-18.
+
+**DEC-005 2026-08-04: KeeperHub's `gasUsedWei` field contains gas UNITS. The frozen formula is right;
+the field name is the drift.**
+
+`ARCHITECTURE` §5(g) pins `gas_used_usdc = (gasUsedWei / 1e18) * runEthUsd`, where `gasUsedWei` means
+wei. KeeperHub's status response has a field of the same name carrying the receipt's `gasUsed` —
+units. Measured on two independent transactions: `status.gasUsedWei` was `68400` and `74093`,
+identical to `result.gasUsed` and `result.gasUsedUnits` in the same payloads, and identical to the
+on-chain receipt's `gasUsed`.
+
+Feeding units into the formula understates cost by a factor of about **6.2 million** — $0.00000000023
+instead of $0.0014 on the CVY-003 transaction. The meter would have looked entirely plausible and
+drained essentially never.
+
+**This is API drift, not an architecture change**, and absorbing it is exactly what
+`packages/kh-client` exists for — the same shape as G-01 (`chainId` vs `network`). The client now
+exposes `gasUsedUnits` and `gasPriceWei` instead of propagating the wrong name, so a consumer cannot
+divide units by 1e18 by accident. The DB column `attempts.gas_used_wei` is frozen and keeps its name;
+it stores **real wei**.
+
+**The L1 fee is not in KeeperHub's response.** Base is an OP-stack L2 and the fee has two parts:
+`units × gasPriceWei` (L2 execution) and `l1Fee` (data availability). KeeperHub returns only the
+first; on the CVY-003 transaction the L1 part was 12,053,372,102 of 422,453,372,102 wei — **2.9%**,
+too large to drop. CVY-007 therefore takes option (b): read `l1Fee` from the transaction receipt via
+`BASE_RPC_URL`, which the manifest reconciles against chain reads at CVY-012 anyway, so the read is
+already on the path. `composeGasFeeWei` still produces a figure without it and sets
+`l1FeeIncluded: false` — under-reporting is allowed only when it is labelled.
+
+Verified end to end: recomputing the fee from the recorded fields equals **422453372102**, the wei
+that actually left the relay. The meter is tied to a balance change on chain, not to itself.
+
+**D-028 2026-08-04: the CVY-005 state arrays did not match the frozen §5(i) machine; corrected here.**
+`RUN_STATUS` omitted `OPENING`, `CRITIQUING`, `SEALING` and `FAILED_FATAL`, and used `SEALED` where
+the machine says `SEALED_OK`. `ITEM_STATE` omitted `RETRYING` and `SKIPPED`. `SKIPPED` is **not an
+addition** — §5(i) names it explicitly as `SKIPPED(budget-exhausted)` — and CVY-007 is the milestone
+that produces it, which is how the omission surfaced. Checking the frozen text before appending to
+the array is what caught this; adding a state that the machine does not name would have been an
+architecture surface change.

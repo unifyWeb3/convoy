@@ -494,3 +494,56 @@ logs `draining in-flight jobs` then `drained cleanly`. Shutdown also reports a *
 honestly rather than claiming a drain that did not happen — a test pins that too.
 
 Decisions DEC-002, DEC-003. Gaps G-26, G-27. **Next: CVY-007.**
+
+---
+
+## CVY-007 — 2026-08-04 — Budget meter + gas→USDC accounting
+
+**The measurement first, because it changed what the meter may claim.**
+
+**DEC-004 — KeeperHub sponsors; the org wallet's balance does not move.** Measured across block
+45020292 for the CVY-003 transaction: org wallet delta **0 wei** (0.1 ETH before, after, and now);
+relay EOA delta **−422,453,372,102 wei**, which equals `gasUsed × effectiveGasPrice + l1Fee` **to the
+wei** — attributing the payment to this transaction rather than to other traffic in that block. Two
+samples on 84532, both `sponsored: true`. That confirms sponsorship is active _here_; **G-08 still
+stands — it is never load-bearing**, and the runbook's 0.02 ETH org-wallet threshold deliberately
+stays.
+
+**DEC-005 / G-28 — `gasUsedWei` is gas UNITS, and the L1 fee is missing.** Two defects in one number,
+both found by measuring. `status.gasUsedWei` was `68400` and `74093` on two transactions — identical
+to `result.gasUsed`, `result.gasUsedUnits`, and the on-chain receipt. It is units wearing a wei name.
+The frozen formula means wei, so feeding it the field understates cost by **~6.2 million times**:
+**$0.00000000023 instead of $0.0014**. The meter would have looked entirely plausible and drained
+essentially never. Separately, Base is an OP-stack L2 and KeeperHub returns only the L2 leg — the
+`l1Fee` was 12,053,372,102 of 422,453,372,102 wei, **2.9%**, too large to drop.
+
+**The frozen formula is right; the field name is the drift** — the same shape as G-01, and absorbing
+it is what `packages/kh-client` is for. The client now exposes `gasUsedUnits` + `gasPriceWei`, so
+dividing units by 1e18 is unreachable. `composeGasFeeWei` adds `l1Fee` from the receipt via
+`BASE_RPC_URL` (option (b): the manifest reconciles against chain reads at CVY-012 anyway, so the
+read is already on the path), and sets `l1FeeIncluded: false` when it could not — under-reporting is
+allowed only when labelled.
+
+**The anchor test ties the meter to the chain, not to itself:** recomputing the fee from the recorded
+fields yields exactly **422453372102 wei**, the amount that left the relay.
+
+**G-18 widened and the README honesty row rewritten.** The old row said "Gas leg from real
+`gasUsedWei`" — doubly wrong: wrong field semantics, and it implies a spend that never happens. It
+now reads: real gas units and a real fee in wei, USD notional at a frozen price, **and KeeperHub
+sponsors so no wallet balance moves — the meter is a policy limit, not a draining account.**
+
+**D-028 — the CVY-005 state arrays did not match frozen §5(i).** Checking before appending `SKIPPED`
+is what caught it: `RUN_STATUS` omitted `OPENING`, `CRITIQUING`, `SEALING`, `FAILED_FATAL` and used
+`SEALED` for `SEALED_OK`; `ITEM_STATE` omitted `RETRYING` and `SKIPPED`. `SKIPPED` is **not** an
+addition — §5(i) names it `SKIPPED(budget-exhausted)`.
+
+**The meter:** `remaining` counts both legs; amber at **≤20%** inclusive; `BUDGET_LOW` fires on the
+**crossing only**, because an event repeated every update trains the operator to ignore it;
+exhaustion marks unfinished items `SKIPPED` and seals `SEALED_PARTIAL` rather than crashing.
+`canAfford` separates `over_budget` (a VETO, terminal, zero gas) from `exhausted` (SKIPPED) —
+collapsing them would mislabel every item after the budget runs out — and **does not veto an item
+that simply has no allocation**, since a missing number is not evidence of overspend and CVY-011's
+bar is zero false vetoes. The pay leg is present and unused (G-17).
+
+22 budget tests; 44 in the worker; 197 repo-wide; 45 Foundry; verify-env 13/0/0. Decisions DEC-004,
+DEC-005, D-028. Gap G-28; G-18 widened. **Next: CVY-008.**

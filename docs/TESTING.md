@@ -8,7 +8,8 @@ CVY-004 the kh-client row is green — 118 tests total in that package, over tap
 live API. As of CVY-005 the DB row is green — 35 tests reading the applied schema back out of
 Postgres rather than trusting `schema.prisma`. As of CVY-006 the queue row is green — 22 tests
 against a real BullMQ worker and a real Redis, because durability and stalled-job behaviour cannot
-be faked with a mock.
+be faked with a mock. As of CVY-007 the budget meter is green — 22 tests, anchored to the wei that
+actually left the payer on the CVY-003 transaction.
 
 ## Catalog
 

@@ -111,7 +111,14 @@ export interface WriteResult {
   readonly status: ExecutionStatus | string;
   readonly transactionHash?: string;
   readonly transactionLink?: string;
-  readonly gasUsedWei?: string;
+  /**
+   * **Gas UNITS, not wei.** KeeperHub's field is named `gasUsedWei` but carries
+   * the receipt's `gasUsed` — measured identical on two transactions (gap
+   * G-28). Renamed here so a consumer cannot divide units by 1e18.
+   */
+  readonly gasUsedUnits?: string;
+  /** Wei per gas unit, from KeeperHub's `gasPriceWei`. */
+  readonly gasPriceWei?: string;
   /** True when the POST response is already terminal and no poll is needed. */
   readonly terminal: boolean;
   readonly httpStatus: number;
@@ -124,7 +131,10 @@ export interface StatusResult {
   readonly status: ExecutionStatus | string;
   readonly transactionHash?: string;
   readonly transactionLink?: string;
-  readonly gasUsedWei?: string;
+  /** **Gas UNITS, not wei** — see WriteResult.gasUsedUnits and gap G-28. */
+  readonly gasUsedUnits?: string;
+  /** Wei per gas unit. */
+  readonly gasPriceWei?: string;
   readonly terminal: boolean;
   /**
    * From the `X-Poll-Interval-Hint` header. **0 means terminal** — stop polling.

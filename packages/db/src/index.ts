@@ -93,18 +93,37 @@ export const unsafeRawClient: PrismaClient = client;
 // cannot invent a state that nothing else understands.
 // ---------------------------------------------------------------------------
 
-/** Run statuses (architecture §5(i)). */
+/**
+ * Run statuses — verbatim from the frozen §5(i) machine:
+ * `RECEIVED → OPENING → PLANNING → CRITIQUING → EXECUTING → SEALING →
+ *  { SEALED_OK | SEALED_PARTIAL }`, `any → ABORTED`,
+ * `OPENING/SEALING → FAILED_FATAL` (401/422).
+ *
+ * Corrected at CVY-007: the CVY-005 array omitted OPENING, CRITIQUING, SEALING
+ * and FAILED_FATAL, and used `SEALED` where the machine says `SEALED_OK`.
+ */
 export const RUN_STATUS = [
   'RECEIVED',
+  'OPENING',
   'PLANNING',
+  'CRITIQUING',
   'EXECUTING',
-  'SEALED',
+  'SEALING',
+  'SEALED_OK',
   'SEALED_PARTIAL',
   'ABORTED',
+  'FAILED_FATAL',
 ] as const;
 export type RunStatus = (typeof RUN_STATUS)[number];
 
-/** Item states (architecture §5(i)). */
+/**
+ * Item states — frozen §5(i). Terminal: LANDED, VETOED, FAILED,
+ * **SKIPPED (budget-exhausted)**.
+ *
+ * Corrected at CVY-007: the CVY-005 array omitted `RETRYING` and `SKIPPED`.
+ * `SKIPPED` is not an addition — §5(i) names it explicitly — and CVY-007 is the
+ * milestone that produces it.
+ */
 export const ITEM_STATE = [
   'PENDING',
   'PLANNED',
@@ -112,10 +131,15 @@ export const ITEM_STATE = [
   'VETOED',
   'COMMITTED',
   'SUBMITTED',
+  'RETRYING',
   'LANDED',
   'FAILED',
   'DEFERRED',
+  'SKIPPED',
 ] as const;
+
+/** States from which no further work is attempted. */
+export const TERMINAL_ITEM_STATES = ['LANDED', 'VETOED', 'FAILED', 'SKIPPED'] as const;
 export type ItemState = (typeof ITEM_STATE)[number];
 
 /** Attempt kinds. */

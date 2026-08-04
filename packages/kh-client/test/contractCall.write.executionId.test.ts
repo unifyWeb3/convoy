@@ -47,7 +47,7 @@ describe('write — executionId', () => {
 
     expect(result.executionId).toBe('direct_abc123');
     expect(result.transactionHash).toBe('0xdead');
-    expect(result.gasUsedWei).toBe('21000');
+    expect(result.gasUsedUnits).toBe('21000');
   });
 
   it('marks a synchronous completed write terminal so the poll is skipped (gap G-02)', async () => {

@@ -1,6 +1,6 @@
 # Convoy Implementation Status (updated 2026-08-03)
 
-Overall: **35% (CVY-000…CVY-006 done; DEC-001/002/003 applied)** Next milestone: **CVY-007 — Budget meter + gas→USDC accounting**
+Overall: **40% (CVY-000…CVY-007 done; DEC-001…DEC-005 applied)** Next milestone: **CVY-008 — Orchestrator + RUN/ITEM state machine**
 
 **The submission requirement is provisionally met.** Both contracts are deployed and
 Basescan-verified on Base Sepolia, and `openRun` landed through the org Turnkey wallet:
