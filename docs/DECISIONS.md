@@ -234,3 +234,27 @@ Same reasoning as D-014 for the payloadHash fixtures. A tape that has been refor
 transcription, not a recording, and the value of a tape is that the bytes came off the wire. A missing
 tape throws rather than falling through to a default, because a VCR suite that silently passes when a
 tape is absent is worse than no VCR suite.
+
+**D-021 2026-08-04: `docs/RUNBOOK_FIRST_TRANSACTION.md` is the single operational authority for the
+deploy and first transaction; four other locations now delegate to it.**
+`docs/DEPLOYMENT.md`, `.convoy/playbooks/release.md`, `.convoy/tasks/CVY-003.md` and
+`Deploy.s.sol`'s NatSpec each carried their own copy of the deploy command. **Every one of them was
+wrong**, in two different ways: `--rpc-url` names a `foundry.toml` key and takes an **underscore**
+(`base_sepolia`), while `--chain` names a Foundry chain enum value and takes a **hyphen**
+(`base-sepolia`) or the numeric id. `release.md` had the rpc-url hyphenated, so it resolved as a file
+path and could never have worked; `DEPLOYMENT.md` and the task card had `--chain base_sepolia`, which
+errors `invalid digit found in string`. Four copies, zero working commands. That is G-19's failure
+mode with a sharper edge, so the commands now live in exactly one file and the others link to it.
+
+**D-022 2026-08-04: `SimulateResult.revertSelector` extracts the 4-byte selector in the client.**
+The API reports a custom error as `execution reverted (unknown custom error)` but includes the revert
+data as `data="0x1c8b6259"`. The name is absent; the selector is not. Extracting it once in
+`packages/kh-client` — whose stated job is absorbing API drift behind stable types — beats having the
+Critic, the manifest and the audit drawer each re-parse an ethers diagnostic blob. This is what
+downgrades G-20 from a threat to CVY-011's veto quality into a lookup against an ABI already in hand.
+
+**D-023 2026-08-04: error selectors are always derived, never hardcoded.**
+The first G-20 measurement used a hand-written constant for `RootNotSet()`. It was wrong, and it
+misreported the verdict as "the API returns no selector" when the API had returned it all along.
+A hardcoded selector is a guess that looks like a fact once it is checked in. Derive them:
+`toFunctionSelector()` in TypeScript, `cast sig` at the terminal.

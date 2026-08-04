@@ -16,14 +16,14 @@ cd packages/contracts && forge fmt --check && forge build && forge test && cd -
 
 ## 1. Contracts — Base Sepolia 84532 (the target chain, DEC-001)
 
-```bash
-cd packages/contracts
-forge script script/Deploy.s.sol --rpc-url base-sepolia --broadcast --verify --chain base-sepolia
-```
+**Follow [`docs/RUNBOOK_FIRST_TRANSACTION.md`](../../docs/RUNBOOK_FIRST_TRANSACTION.md) — it is the
+single operational authority for the deploy and the first transaction.** Its Part 1 covers funded
+addresses, environment confirmation, the dry run, the deploy, the first transaction, rollback and
+troubleshooting; its Part 2 records the resulting addresses and hashes.
 
-Record the addresses. Run `scripts/first-tx.ts` against Sepolia to prove the whole KeeperHub write
-path. **This is the release, not a rehearsal for one** — DEC-001 makes 84532 the chain for
-development, rehearsal and the demo.
+The commands are not repeated here. The copy that used to live in this section had `--rpc-url
+base-sepolia`, which Foundry resolves as a _file path_ and which therefore could never have worked —
+which is precisely the argument for one authority.
 
 ## 2. Contracts — Base mainnet 8453 (OPTIONAL, CVY-019 flip only)
 

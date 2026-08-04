@@ -32,7 +32,7 @@
     "functionArgs": "[\"1000000000000000000000000\"]",
     "abi": "[{\"name\":\"withdraw\",\"type\":\"function\",\"stateMutability\":\"nonpayable\",\"inputs\":[{\"name\":\"wad\",\"type\":\"uint256\"}],\"outputs\":[]}]",
     "simulate": true,
-    "_authorization": "Bearer kh_AHU\u20260R0I (35 chars)"
+    "_authorization": "Bearer <REDACTED_KH_KEY>"
   },
   "responseBody": {
     "success": false,

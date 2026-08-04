@@ -280,3 +280,90 @@ Decisions D-016…D-020. Files: `packages/kh-client/src/{types,errors,idempotenc
 `docs/{KNOWN_GAPS,DECISIONS,TESTING,IMPLEMENTATION_STATUS,WORKLOG}.md`
 
 **Next: CVY-003**, now genuinely unblocked — credentials present, write path proven.
+
+---
+
+## CVY-003 — 2026-08-04 — deploy, verify, and the FIRST REAL BASE TRANSACTION
+
+**The hackathon's hard submission requirement is provisionally met.**
+
+Both contracts deployed and **Basescan-verified** on Base Sepolia 84532, in one broadcast, block
+45020238, 564,150 gas total:
+
+- `ConvoyRegistry` — `0xec51F84BD04dB4515Aa654a4a4f57Ce7596850dA`
+- `MockRewardDistributor` — `0xD45c61797d7283caf8A31D91A5Bd6465A45AD561`
+
+`openRun` landed through the org Turnkey wallet via `@convoy/kh-client`:
+`0x1ffb4aaf9525fd68b5d8eabe96d1e99058bbc40f9b0d7f7db102aa0d81b2bbcd`
+(execId `9qcx2ggv8xcblnl1y3jl5`, gasUsedWei 68,400, retryCount 0, sponsored true).
+
+**Verified independently of KeeperHub's own report**, because a reliability claim resting on the
+vendor's word is not a reliability claim: receipt `status=0x1`; exactly one log whose `topic0` equals
+`cast sig-event "RunOpened(bytes32,address,uint64)"`; the indexed `operator` is the org wallet; and
+`runs(runId)` reads `state=1 (Open), committedCount=0`.
+
+**Runbook.** `docs/RUNBOOK_FIRST_TRANSACTION.md` is now the single operational authority for this
+sequence — pre-flight in Part 1, real output in Part 2. `DEPLOYMENT.md`, `release.md`, the CVY-003
+card and `Deploy.s.sol`'s NatSpec all delegate to it and no longer carry commands (D-021).
+
+Writing it exposed that **all four previous copies of the deploy command were broken**, in two
+different ways: `--rpc-url` takes an underscore (`base_sepolia`, a `foundry.toml` key) and `--chain`
+takes a hyphen (`base-sepolia`, a Foundry enum) or the numeric id. `release.md` had the rpc-url
+hyphenated — it resolved as a _file path_; the other two had `--chain base_sepolia`, which errors
+`invalid digit found in string`. Four copies, zero that worked. Executing the runbook also exposed
+that its own §1.4 pre-flight could not simulate `openRun` before the registry existed; pre-flight now
+probes the WETH9 predeploy, which answers the actual question ("is the wallet provisioned for
+84532?") without depending on anything Convoy deploys.
+
+**D-019 CLOSED.** The named `fund`-before-`setRoot` case ran against the deployed
+`MockRewardDistributor`: HTTP 400, `wouldRevert:true`, `data="0x1c8b6259"` = `RootNotSet()`. CVY-004's
+WETH9 substitution does not carry forward. Tape: `test/vcr/d019.fundBeforeSetRoot.revert.json`.
+
+**G-20 MITIGATED — and the CVY-004 conclusion was wrong.** CVY-004 measured `data=null` against WETH9
+and suspected the API could not decode custom errors. It can carry them: WETH9's bare `require` emits
+no revert data at all, so that was the contract's doing. Against a custom-error contract the API
+returns `data="0x1c8b6259"` — the name is absent but the **selector is fully recoverable**.
+`SimulateResult.revertSelector` now extracts it (D-022), so CVY-011 maps selector → name from the ABI
+and the Critic's veto evidence reads `RootNotSet()` rather than "unknown custom error".
+
+**Self-correction worth recording (D-023):** the first run of this measurement used a _hardcoded_
+selector constant for `RootNotSet()`. It was wrong, and it misreported the verdict as branch b
+("no selector present") when the API had returned the selector all along. Selectors are now derived —
+`toFunctionSelector()` in TS, `cast sig` at the terminal. A hardcoded selector is a guess that looks
+like a fact once committed.
+
+**G-24 recorded (OPEN).** The receipt's `to` is KeeperHub's sponsoring relay
+(`0x5af5194b…7f07d`), not the registry, and `from` is a relay EOA, not the org wallet. The org wallet
+is still the effective sender — provable from the log's `operator` topic and registry storage. **This
+lands at CVY-012:** reconciling the manifest's onchain leg by `to == CONVOY_REGISTRY_ADDR` would mark
+every item as a divergence, an amber row on a correct run.
+
+118 kh-client tests green. Full gate clean. README honesty table and artifact table now carry the
+real Basescan links. **Next: CVY-005.**
+
+### CVY-003 addendum — two defects the verification gate caught after the transaction landed
+
+**1. Both read RPCs were pointed at Base mainnet.** `verify-env.ts`'s chain pin went **blocking**:
+`eth_chainId == 0x2105 (8453), expected 84532`. `BASE_RPC_URL` _and_ `BASE_RPC_URL_FALLBACK` were
+8453 endpoints; only `BASE_SEPOLIA_RPC_URL` was correct. The deploy and the transaction were
+unaffected — Foundry used `BASE_SEPOLIA_RPC_URL` and the write went through KeeperHub — but registry
+reads would have returned nothing (the contracts are on Sepolia), and demo backup path b would have
+hot-swapped onto the wrong chain mid-demo. Both repointed at 84532. This is the pin from DEC-001
+doing exactly the job it was added for.
+
+`BASE_RPC_URL_FALLBACK` now shares a provider with `BASE_RPC_URL`, so the chain is right but the
+**redundancy is nominal** until the operator supplies a second 84532 provider. Flagged in the runbook
+rather than quietly counted as done.
+
+**2. The KeeperHub rows in `verify-env.ts` were never wired.** They still read "expected until
+CVY-004" after CVY-004 shipped — a permanently-stale expected-failure, which is the kind of row a
+reader learns to skip. Both now run one real `simulate:true` **through `@convoy/kh-client`** (the
+script still never speaks to KeeperHub directly; that boundary holds). Zero gas, no signing, no
+broadcast. The wallet row keys on 422 specifically, since that is the "org wallet not configured"
+signal and is fatal-to-run.
+
+Wiring it exposed that **`@convoy/kh-client` was not a root dependency at all** — `scripts/` had been
+resolving it by luck of tsx's static-import handling, and a dynamic import failed outright. Added as
+`workspace:*` so both `first-tx.ts` and `verify-env.ts` resolve deterministically.
+
+`scripts/verify-env.ts`: **11 passed · 2 expected-fail (CVY-005) · 0 blocking.**

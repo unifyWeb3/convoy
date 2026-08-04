@@ -8,7 +8,8 @@
  *    reason and the milestone that will make it pass.
  *  - It never calls KeeperHub directly. `packages/kh-client` is the only module
  *    permitted to reach the KeeperHub API, and a script is not an exception to
- *    that boundary — the KeeperHub rows are wired through the client at CVY-004.
+ *    that boundary. Since CVY-004 the KeeperHub rows run a real `simulate:true`
+ *    THROUGH that client — zero gas, no signing, no broadcast, no audit row.
  *  - It never reads or prints a secret value.
  *
  * Exit code: 0 if every check that is expected to pass at the current stage
@@ -274,30 +275,85 @@ async function checkMigrations(): Promise<Result> {
   }
 }
 
+/**
+ * One live simulate, shared by the auth and wallet checks.
+ *
+ * Routed through `@convoy/kh-client` — this script still never speaks to
+ * KeeperHub directly, because that package is the only module permitted to.
+ * A simulate signs nothing, broadcasts nothing and creates no audit row, so the
+ * verification costs nothing and changes nothing.
+ */
+let keeperHubProbe: Promise<{ ok: boolean; detail: string; status?: number }> | undefined;
+
+function probeKeeperHub(): Promise<{ ok: boolean; detail: string; status?: number }> {
+  keeperHubProbe ??= (async () => {
+    const key = env('KEEPERHUB_API_KEY');
+    if (key === undefined) return { ok: false, detail: 'KEEPERHUB_API_KEY not set' };
+    try {
+      const { KhClient, simulateContractCall } = await import('@convoy/kh-client');
+      const client = new KhClient({
+        apiKey: key,
+        baseUrl: env('KEEPERHUB_BASE_URL'),
+        chainId: '84532',
+      });
+      // The WETH9 predeploy: exists on 84532 independently of anything Convoy
+      // deploys, so this probes the credential and the wallet, not our contracts.
+      const sim = await simulateContractCall(client, {
+        contractAddress: '0x4200000000000000000000000000000000000006',
+        functionName: 'deposit',
+        functionArgs: [],
+        abi: [
+          {
+            name: 'deposit',
+            type: 'function',
+            stateMutability: 'payable',
+            inputs: [],
+            outputs: [],
+          },
+        ],
+        value: '0',
+      });
+      return {
+        ok: !sim.wouldRevert,
+        status: sim.httpStatus,
+        detail: sim.wouldRevert
+          ? `simulate would revert: ${sim.revertReason ?? 'no reason'}`
+          : `simulate HTTP ${sim.httpStatus}, sender ${sim.from ?? 'unknown'}`,
+      };
+    } catch (e) {
+      const err = e as { httpStatus?: number; classification?: string; message?: string };
+      return {
+        ok: false,
+        status: err.httpStatus,
+        detail: `${err.classification ?? 'error'}: ${err.message ?? String(e)}`,
+      };
+    }
+  })();
+  return keeperHubProbe;
+}
+
 async function checkKeeperHubAuth(): Promise<Result> {
-  const key = env('KEEPERHUB_API_KEY');
-  const base = env('KEEPERHUB_BASE_URL');
-  const missing: string[] = [];
-  if (key === undefined) missing.push('KEEPERHUB_API_KEY');
-  if (base === undefined) missing.push('KEEPERHUB_BASE_URL');
+  const r = await probeKeeperHub();
   return {
     check: 'KeeperHub auth',
-    status: 'FAIL',
-    detail:
-      missing.length > 0
-        ? `${missing.join(' + ')} not set; check runs through @convoy/kh-client from CVY-004`
-        : 'credentials present, but this script never calls KeeperHub directly — the check is wired through @convoy/kh-client at CVY-004',
-    expectedFrom: 'CVY-004',
+    status: r.ok ? 'PASS' : 'FAIL',
+    detail: r.ok ? `key accepted — ${r.detail}` : r.detail,
   };
 }
 
 async function checkKeeperHubWallet(): Promise<Result> {
+  const r = await probeKeeperHub();
+  // 422 is the specific signal that the org Turnkey wallet is not configured
+  // for this chain (gap G-03). It is fatal-to-run, not a transient fault.
+  const notConfigured = r.status === 422;
   return {
     check: 'KeeperHub wallet configured',
-    status: 'FAIL',
-    detail:
-      'org Turnkey wallet is confirmed via MCP get_wallet_integration (must not return 422); wired through @convoy/kh-client at CVY-004',
-    expectedFrom: 'CVY-004',
+    status: r.ok ? 'PASS' : 'FAIL',
+    detail: notConfigured
+      ? '422 — org Turnkey wallet is NOT configured for 84532 (fatal to any run)'
+      : r.ok
+        ? `org wallet is the simulate sender — ${r.detail}`
+        : r.detail,
   };
 }
 

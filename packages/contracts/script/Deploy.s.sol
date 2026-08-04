@@ -17,11 +17,10 @@ import { MockRewardDistributor } from "../src/MockRewardDistributor.sol";
 ///      chain reverts), and `vm.envUint` reverts when the key is absent. Without `--broadcast`,
 ///      `forge script` only simulates — nothing is sent.
 ///
-///      Testnet:  forge script script/Deploy.s.sol --rpc-url base_sepolia --broadcast --verify
-///      Mainnet:  forge script script/Deploy.s.sol --rpc-url base --broadcast --verify
-///
-///      Record both addresses in `.env` (`CONVOY_REGISTRY_ADDR`, `MOCK_DISTRIBUTOR_ADDR`),
-///      `docs/DEPLOYMENT.md`, and the README artifact table.
+///      Commands, flag separators and troubleshooting live in
+///      `docs/RUNBOOK_FIRST_TRANSACTION.md`, the single operational authority for this sequence.
+///      They are not repeated here: `--rpc-url` and `--chain` take opposite separators, and every
+///      copy of the command that was written from memory got one of them wrong.
 contract Deploy is Script {
     uint256 internal constant BASE_MAINNET = 8453;
     uint256 internal constant BASE_SEPOLIA = 84_532;

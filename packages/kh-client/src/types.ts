@@ -71,6 +71,17 @@ export interface SimulateResult {
   readonly gasEstimate?: string;
   /** Present when `wouldRevert` is true. See gap G-20 on decode quality. */
   readonly revertReason?: string;
+  /**
+   * The 4-byte custom-error selector, extracted from `revertReason`.
+   *
+   * Measured 2026-08-04 (gap G-20): the API does not name custom errors — it
+   * says `execution reverted (unknown custom error)` — but it *does* carry the
+   * raw revert data, e.g. `data="0x1c8b6259"`, which is `RootNotSet()`. The
+   * selector is therefore fully recoverable, and a consumer holding the ABI can
+   * map it back to the error name. Surfaced here so every consumer does not
+   * re-parse a diagnostic blob.
+   */
+  readonly revertSelector?: string;
   readonly from?: string;
   readonly to?: string;
   readonly value?: string;

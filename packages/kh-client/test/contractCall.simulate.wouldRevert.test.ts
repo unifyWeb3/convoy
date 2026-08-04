@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { toFunctionSelector } from 'viem';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { KhClient } from '../src/client.js';
 import type { VcrTape } from '../src/client.js';
 import { KhError } from '../src/errors.js';
-import { simulateContractCall } from '../src/contractCall.js';
+import { extractRevertSelector, simulateContractCall } from '../src/contractCall.js';
 import type { ContractCallParams } from '../src/types.js';
 
 interface Recording {
@@ -190,5 +191,38 @@ describe('chain validation happens before any request is sent', () => {
           chainId: '999999' as unknown as '84532',
         }),
     ).toThrow(/unsupported chainId/i);
+  });
+});
+
+describe('revertSelector extraction (gap G-20)', () => {
+  it('pulls the selector out of an "unknown custom error" blob', () => {
+    // Verbatim from the deployed MockRewardDistributor, 2026-08-04. The API does
+    // not name the error, but it carries the revert data — and 0x1c8b6259 is
+    // exactly keccak256("RootNotSet()")[0..4].
+    const blob =
+      'Simulation reverted: execution reverted (unknown custom error) ' +
+      '(action="estimateGas", data="0x1c8b6259", reason=null, transaction={ … }, ' +
+      'code=CALL_EXCEPTION, version=6.16.0)';
+    expect(extractRevertSelector(blob)).toBe('0x1c8b6259');
+  });
+
+  it('matches the selector viem derives from the signature — never a hardcoded guess', () => {
+    const blob = 'data="0x1c8b6259", reason=null';
+    expect(extractRevertSelector(blob)).toBe(toFunctionSelector('RootNotSet()'));
+  });
+
+  it('returns undefined when the revert carried no data (a bare require)', () => {
+    // WETH9's `require` emits no revert data at all — this is the G-20 case that
+    // originally looked like an API failure and was actually the contract's.
+    const blob = 'Simulation reverted: missing revert data (action="call", data=null, reason=null)';
+    expect(extractRevertSelector(blob)).toBeUndefined();
+    expect(extractRevertSelector('data="0x"')).toBeUndefined();
+    expect(extractRevertSelector(undefined)).toBeUndefined();
+  });
+
+  it('takes only the first 4 bytes when the revert data carries arguments', () => {
+    expect(extractRevertSelector('data="0x1c8b6259000000000000000000000000000000ff"')).toBe(
+      '0x1c8b6259',
+    );
   });
 });

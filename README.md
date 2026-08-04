@@ -8,11 +8,11 @@ from genuine failures, and exports one replayable manifest.
 Built for the KeeperHub **Agents Onchain** hackathon (DoraHacks). Chain: **Base Sepolia (84532)**
 (decision DEC-001). Base mainnet (8453) is an optional final demo target, not the build target.
 
-> **Status:** CVY-002 complete — contracts implemented and tested (45 Foundry tests), the payload
-> commitment proven byte-identical across Solidity and TypeScript (47 assertions over 13 dumped
-> fixtures), and the deploy script written. Nothing is deployed yet; no transaction hash is claimed.
-> CVY-003 (the first real Base transaction) is blocked on operator credentials.
-> Live status: [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md).
+> **Status:** CVY-003 complete — both contracts are **deployed and Basescan-verified** on Base
+> Sepolia, and the first real transaction has landed through KeeperHub's org Turnkey wallet:
+> [`0x1ffb4aaf…b2bbcd`](https://sepolia.basescan.org/tx/0x1ffb4aaf9525fd68b5d8eabe96d1e99058bbc40f9b0d7f7db102aa0d81b2bbcd).
+> Live status: [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md) ·
+> deploy runbook: [`docs/RUNBOOK_FIRST_TRANSACTION.md`](docs/RUNBOOK_FIRST_TRANSACTION.md).
 
 ---
 
@@ -37,11 +37,11 @@ milestones land — a row without an artifact link is not a claim Convoy makes.
 
 ## Verified onchain artifacts
 
-| Artifact                           | Network            | Address / hash    | Explorer | Verified |
-| ---------------------------------- | ------------------ | ----------------- | -------- | -------- |
-| ConvoyRegistry                     | Base Sepolia 84532 | _pending CVY-003_ | —        | —        |
-| MockRewardDistributor (demo only)  | Base Sepolia 84532 | _pending CVY-003_ | —        | —        |
-| Submission transaction (`openRun`) | Base Sepolia 84532 | _pending CVY-003_ | —        | —        |
+| Artifact                           | Network            | Address / hash                                                       | Explorer                                                                                                   | Verified    |
+| ---------------------------------- | ------------------ | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ----------- |
+| ConvoyRegistry                     | Base Sepolia 84532 | `0xec51F84BD04dB4515Aa654a4a4f57Ce7596850dA`                         | [view](https://sepolia.basescan.org/address/0xec51F84BD04dB4515Aa654a4a4f57Ce7596850dA#code)               | ✅ verified |
+| MockRewardDistributor (demo only)  | Base Sepolia 84532 | `0xD45c61797d7283caf8A31D91A5Bd6465A45AD561`                         | [view](https://sepolia.basescan.org/address/0xD45c61797d7283caf8A31D91A5Bd6465A45AD561#code)               | ✅ verified |
+| Submission transaction (`openRun`) | Base Sepolia 84532 | `0x1ffb4aaf9525fd68b5d8eabe96d1e99058bbc40f9b0d7f7db102aa0d81b2bbcd` | [view](https://sepolia.basescan.org/tx/0x1ffb4aaf9525fd68b5d8eabe96d1e99058bbc40f9b0d7f7db102aa0d81b2bbcd) | —           |
 
 ## Ablation results
 
@@ -85,18 +85,19 @@ Requires local Postgres and Redis. Copy `.env.example` to `.env` and fill it in 
 
 ## Documentation
 
-| Doc                                                                    | Purpose                                 |
-| ---------------------------------------------------------------------- | --------------------------------------- |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)                         | Frozen protocol source of truth         |
-| [`docs/IMPLEMENTATION_BLUEPRINT.md`](docs/IMPLEMENTATION_BLUEPRINT.md) | Frozen implementation source of truth   |
-| [`docs/PRODUCT_DISCOVERY.md`](docs/PRODUCT_DISCOVERY.md)               | Frozen product source of truth          |
-| [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md)       | Live milestone dashboard                |
-| [`docs/WORKLOG.md`](docs/WORKLOG.md)                                   | Append-only build diary                 |
-| [`docs/KNOWN_GAPS.md`](docs/KNOWN_GAPS.md)                             | Gaps, drift, and documented fallbacks   |
-| [`docs/TESTING.md`](docs/TESTING.md)                                   | Test catalog and commands               |
-| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)                             | Deploy and rollback                     |
-| [`docs/AI_WORKFLOW.md`](docs/AI_WORKFLOW.md)                           | Milestone lifecycle and operating rules |
-| [`docs/DECISIONS.md`](docs/DECISIONS.md)                               | Numbered decision log                   |
+| Doc                                                                      | Purpose                                 |
+| ------------------------------------------------------------------------ | --------------------------------------- |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)                           | Frozen protocol source of truth         |
+| [`docs/IMPLEMENTATION_BLUEPRINT.md`](docs/IMPLEMENTATION_BLUEPRINT.md)   | Frozen implementation source of truth   |
+| [`docs/PRODUCT_DISCOVERY.md`](docs/PRODUCT_DISCOVERY.md)                 | Frozen product source of truth          |
+| [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md)         | Live milestone dashboard                |
+| [`docs/WORKLOG.md`](docs/WORKLOG.md)                                     | Append-only build diary                 |
+| [`docs/KNOWN_GAPS.md`](docs/KNOWN_GAPS.md)                               | Gaps, drift, and documented fallbacks   |
+| [`docs/TESTING.md`](docs/TESTING.md)                                     | Test catalog and commands               |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)                               | Deploy and rollback                     |
+| [`docs/RUNBOOK_FIRST_TRANSACTION.md`](docs/RUNBOOK_FIRST_TRANSACTION.md) | **Authority** for deploy + first tx     |
+| [`docs/AI_WORKFLOW.md`](docs/AI_WORKFLOW.md)                             | Milestone lifecycle and operating rules |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md)                                 | Numbered decision log                   |
 
 ## License
 

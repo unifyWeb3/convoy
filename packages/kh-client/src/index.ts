@@ -23,6 +23,7 @@ export type {
 export {
   CONTRACT_CALL_PATH,
   buildContractCallBody,
+  extractRevertSelector,
   simulateContractCall,
   writeContractCall,
 } from './contractCall.js';

@@ -53,6 +53,22 @@ function str(v: unknown): string | undefined {
 }
 
 /**
+ * Pull the 4-byte custom-error selector out of a revertReason blob.
+ *
+ * The API reports custom errors as `execution reverted (unknown custom error)`
+ * but still carries the revert data as `data="0x1c8b6259"` (gap G-20). The
+ * selector is what makes the error identifiable, so it is extracted once here
+ * rather than in every consumer. `data="0x"` and `data=null` mean the revert
+ * carried no data at all — a bare `require`, not a custom error — and yield
+ * undefined.
+ */
+export function extractRevertSelector(revertReason: string | undefined): string | undefined {
+  if (revertReason === undefined) return undefined;
+  const m = /\bdata="(0x[0-9a-fA-F]{8})[0-9a-fA-F]*"/.exec(revertReason);
+  return m?.[1]?.toLowerCase();
+}
+
+/**
  * Simulate a call. Costs zero gas: no signing, no broadcast, no audit row.
  *
  * **HTTP 400 with `wouldRevert:true` is a successful simulate, not an error.**
@@ -95,10 +111,13 @@ export async function simulateContractCall(
     });
   }
 
+  const revertReason = str(b['revertReason']) ?? str(b['error']);
+
   return {
     wouldRevert: b['wouldRevert'] === true,
     gasEstimate: str(b['gasEstimate']),
-    revertReason: str(b['revertReason']) ?? str(b['error']),
+    revertReason,
+    revertSelector: extractRevertSelector(revertReason),
     from: str(b['from']),
     to: str(b['to']),
     value: str(b['value']),

@@ -1,10 +1,11 @@
 # Convoy Implementation Status (updated 2026-08-03)
 
-Overall: **20% (CVY-000, CVY-001, CVY-002, CVY-004 done; DEC-001 applied)** Next milestone: **CVY-003 — Deploy+verify on Base Sepolia; FIRST REAL BASE TX**
+Overall: **25% (CVY-000…CVY-004 done; DEC-001 applied)** Next milestone: **CVY-005 — DB package: Prisma schema, migrations, seed**
 
-**CVY-003 is now unblocked.** Its dependency — a write path from CVY-004 — exists and has executed a
-real write on Base Sepolia. Nothing is deployed yet: `ConvoyRegistry` and `MockRewardDistributor` have
-no addresses, and no `openRun` transaction is claimed.
+**The submission requirement is provisionally met.** Both contracts are deployed and
+Basescan-verified on Base Sepolia, and `openRun` landed through the org Turnkey wallet:
+[`0x1ffb4aaf9525fd68b5d8eabe96d1e99058bbc40f9b0d7f7db102aa0d81b2bbcd`](https://sepolia.basescan.org/tx/0x1ffb4aaf9525fd68b5d8eabe96d1e99058bbc40f9b0d7f7db102aa0d81b2bbcd).
+Addresses and evidence: [`docs/RUNBOOK_FIRST_TRANSACTION.md`](RUNBOOK_FIRST_TRANSACTION.md) Part 2.
 
 **Execution chain: Base Sepolia (84532)** per DEC-001. Base mainnet (8453) is an optional final demo
 target at CVY-019, not the development target.
@@ -16,7 +17,7 @@ target at CVY-019, not the development target.
 | CVY-002   | payloadHash parity (Sol↔TS) + deploy script                 | DONE        | 100 | 13 dumped fixtures, 47 parity assertions; deploy script written, not run |
 | DEC-001   | _Amendment_ — execution chain → Base Sepolia 84532          | DONE        | 100 | Not a milestone; a scoped spec amendment. See docs/DECISIONS.md          |
 | CVY-004   | kh-client: write + simulate + status + errors + idempotency | DONE        | 100 | 114 tests; live smoke on 84532; drift G-20…G-23 recorded                 |
-| CVY-003   | Deploy+verify on Base Sepolia; **FIRST REAL BASE TX**       | TODO        | 0   | **next** — unblocked: credentials present, write path proven             |
+| CVY-003   | Deploy+verify on Base Sepolia; **FIRST REAL BASE TX**       | DONE        | 100 | Both verified; openRun landed. D-019 closed, G-20 mitigated              |
 | CVY-005   | DB package: Prisma schema, migrations, seed                 | TODO        | 0   |                                                                          |
 | CVY-006   | BullMQ queue + worker + idempotent handlers                 | TODO        | 0   |                                                                          |
 | CVY-007   | Budget meter + gas→USDC accounting                          | TODO        | 0   |                                                                          |

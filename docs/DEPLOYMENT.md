@@ -1,7 +1,14 @@
 # Deployment
 
-Operational sequence lives in `.convoy/playbooks/release.md`. This document is the reference:
-stages, environments, addresses, and rollback.
+**The deploy and first transaction are governed by
+[`docs/RUNBOOK_FIRST_TRANSACTION.md`](RUNBOOK_FIRST_TRANSACTION.md), which is the single operational
+authority for that sequence.** This document does not repeat its commands — gap G-19 exists because
+two documents disagreed about a deploy target, and every previously-written copy of the deploy
+command in this repository had a flag wrong.
+
+This document is the wider reference: stages, environments, deployed addresses, and rollback for
+everything _other_ than the first deploy. `.convoy/playbooks/release.md` is the operational sequence
+for web and worker releases.
 
 ## Stages
 
@@ -10,9 +17,9 @@ stages, environments, addresses, and rollback.
 | Local dev              | `pnpm install`; local Postgres + Redis; `db:migrate`; `pnpm --filter @convoy/web dev` + `pnpm --filter @convoy/worker dev`.                                    |
 | Env verification       | `pnpm tsx scripts/verify-env.ts` → PASS/FAIL matrix.                                                                                                           |
 | Dependency validation  | `pnpm -r build`; `forge build`; `db:generate`.                                                                                                                 |
-| Deploy (target chain)  | `forge script script/Deploy.s.sol --rpc-url base_sepolia --broadcast --verify --chain base_sepolia` (84532, DEC-001); first-tx via kh-client.                  |
+| Deploy (target chain)  | **See [RUNBOOK_FIRST_TRANSACTION.md](RUNBOOK_FIRST_TRANSACTION.md) §1.6–1.7.** Chain 84532 (DEC-001).                                                          |
 | KeeperHub verification | `/mcp` OAuth or `kh_` Bearer; `get_wallet_integration` confirms the org wallet; one simulate + one write; confirm the `transactionLink`.                       |
-| Smoke tests            | `scripts/first-tx.ts`; `demo.spec.ts` against the preview URL.                                                                                                 |
+| Smoke tests            | `demo.spec.ts` against the preview URL. First-tx is runbook §1.7.                                                                                              |
 | Release candidate      | Tag; full CI + Playwright; freeze P1 if GATE 2 is unstable.                                                                                                    |
 | Mainnet deploy (opt.)  | **Optional, CVY-019 only.** `--rpc-url base --broadcast --verify --chain base` (8453); needs `BASE_MAINNET_RPC_URL`, unset by default.                         |
 | Web deploy             | **Vercel git integration only — never the CLI.** One project, Root Directory `apps/web`, environment set in the dashboard; push to `main` triggers production. |
@@ -28,36 +35,24 @@ and are no longer accepted. One key covers Base.
 
 ## Deployed addresses
 
-| Contract              | Network              | Address           | Verified | Deployed at |
-| --------------------- | -------------------- | ----------------- | -------- | ----------- |
-| ConvoyRegistry        | Base Sepolia 84532   | _pending CVY-003_ | —        | —           |
-| MockRewardDistributor | Base Sepolia 84532   | _pending CVY-003_ | —        | —           |
-| ConvoyRegistry        | Base 8453 (optional) | _not planned_     | —        | —           |
-| MockRewardDistributor | Base 8453 (optional) | _not planned_     | —        | —           |
+**Recorded in [RUNBOOK_FIRST_TRANSACTION.md](RUNBOOK_FIRST_TRANSACTION.md) Part 2**, which is filled
+in from real deployment output. Keeping one copy is the point: two address tables that can disagree
+is the G-19 failure mode applied to something far more damaging than a chain name.
 
-Record each address in `.env` (`CONVOY_REGISTRY_ADDR`, `MOCK_DISTRIBUTOR_ADDR`), in the Vercel
-dashboard, and in the README artifact table.
+Each address is additionally recorded in `.env` (`CONVOY_REGISTRY_ADDR`, `MOCK_DISTRIBUTOR_ADDR`),
+in the Vercel dashboard, and in the README artifact table.
 
-### The deploy script (written at CVY-002, run at CVY-003)
+### The deploy script
 
-`packages/contracts/script/Deploy.s.sol` deploys `ConvoyRegistry` and `MockRewardDistributor` in one
-broadcast and prints both addresses. It is parameterised by the chain it is pointed at:
+`packages/contracts/script/Deploy.s.sol` deploys both contracts in one broadcast, guarded by a chain
+allowlist (8453 / 84532) and by `vm.envUint` reverting when the key is absent.
 
-```bash
-cd packages/contracts
-forge script script/Deploy.s.sol --rpc-url base_sepolia --broadcast --verify   # 84532 — the target
-forge script script/Deploy.s.sol --rpc-url base         --broadcast --verify   # 8453 — optional, CVY-019
-```
+**Commands, flag separators, pre-flight checks and troubleshooting live in
+[RUNBOOK_FIRST_TRANSACTION.md](RUNBOOK_FIRST_TRANSACTION.md).** They are deliberately not repeated
+here.
 
-Two guards stand between a stray command and a real deploy:
-
-1. **Chain allowlist.** `block.chainid` must be 8453 or 84532; anything else reverts
-   `UnsupportedChain(chainId)`. Verified — running the script with no `--rpc-url` reverts
-   `UnsupportedChain(31337)` rather than doing anything.
-2. **Key must be present.** `vm.envUint("DEPLOYER_PRIVATE_KEY")` reverts when the variable is unset.
-
-Without `--broadcast`, `forge script` only simulates. `DEPLOYER_PRIVATE_KEY` is read here and nowhere
-else in the repository; the CI grep-guard enforces that.
+`DEPLOYER_PRIVATE_KEY` is read there and nowhere else in the repository; the CI grep-guard enforces
+that.
 
 ## Environment by surface
 

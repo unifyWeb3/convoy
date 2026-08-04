@@ -28,7 +28,7 @@
     "functionArgs": "[]",
     "abi": "[{\"name\":\"deposit\",\"type\":\"function\",\"stateMutability\":\"payable\",\"inputs\":[],\"outputs\":[]}]",
     "simulate": true,
-    "_authorization": "Bearer kh_AHU\u20260R0I (35 chars)"
+    "_authorization": "Bearer <REDACTED_KH_KEY>"
   },
   "responseBody": ""
 }

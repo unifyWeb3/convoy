@@ -1,7 +1,7 @@
 {
   "probedAt": "2026-08-03T22:28:32.842Z",
   "baseUrl": "https://app.keeperhub.com",
-  "keyUsed": "kh_AHU…0R0I (35 chars)",
+  "keyUsed": "<REDACTED_KH_KEY>",
   "primary": {
     "label": "DEC-001 target — Base Sepolia",
     "chain": "84532",
@@ -41,7 +41,7 @@
       "abi": "[{\"name\":\"deposit\",\"type\":\"function\",\"stateMutability\":\"payable\",\"inputs\":[],\"outputs\":[]}]",
       "value": "0",
       "simulate": true,
-      "_authorization": "Bearer kh_AHU…0R0I (35 chars)"
+      "_authorization": "Bearer <REDACTED_KH_KEY>"
     },
     "responseBody": {
       "success": true,

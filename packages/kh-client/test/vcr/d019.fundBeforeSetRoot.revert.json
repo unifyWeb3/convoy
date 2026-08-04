@@ -1,0 +1,46 @@
+{
+  "recordedAt": "2026-08-04T02:04:14.199Z",
+  "note": "D-019 closure evidence: fund() before setRoot() on the deployed MockRewardDistributor.",
+  "chainId": "84532",
+  "request": {
+    "contractAddress": "0xD45c61797d7283caf8A31D91A5Bd6465A45AD561",
+    "functionName": "fund",
+    "functionArgs": [
+      "1000000"
+    ],
+    "abi": [
+      {
+        "name": "fund",
+        "type": "function",
+        "stateMutability": "nonpayable",
+        "inputs": [
+          {
+            "name": "amount",
+            "type": "uint256"
+          }
+        ],
+        "outputs": []
+      }
+    ],
+    "simulate": true,
+    "_authorization": "Bearer <REDACTED_KH_KEY>"
+  },
+  "httpStatus": 400,
+  "wouldRevert": true,
+  "revertReason": "Simulation reverted: execution reverted (unknown custom error) (action=\"estimateGas\", data=\"0x1c8b6259\", reason=null, transaction={ \"data\": \"0xca1d209d00000000000000000000000000000000000000000000000000000000000f4240\", \"from\": \"0x65F5AFd3b4d5F7d58C408300569a11f0EC190Da6\", \"to\": \"0xD45c61797d7283caf8A31D91A5Bd6465A45AD561\" }, invocation=null, revert=null, code=CALL_EXCEPTION, version=6.16.0)",
+  "revertSelector": "0x1c8b6259",
+  "decodesTo": "RootNotSet()",
+  "g20Branch": "c",
+  "g20Verdict": "carries the selector but not the name — CVY-011 maps selector -> name from the ABI",
+  "g20RootNotSetSelector": "0x1c8b6259",
+  "responseBody": {
+    "success": false,
+    "status": "simulated",
+    "from": "0x65f5afd3b4d5f7d58c408300569a11f0ec190da6",
+    "to": "0xD45c61797d7283caf8A31D91A5Bd6465A45AD561",
+    "value": "0",
+    "wouldRevert": true,
+    "revertReason": "Simulation reverted: execution reverted (unknown custom error) (action=\"estimateGas\", data=\"0x1c8b6259\", reason=null, transaction={ \"data\": \"0xca1d209d00000000000000000000000000000000000000000000000000000000000f4240\", \"from\": \"0x65F5AFd3b4d5F7d58C408300569a11f0EC190Da6\", \"to\": \"0xD45c61797d7283caf8A31D91A5Bd6465A45AD561\" }, invocation=null, revert=null, code=CALL_EXCEPTION, version=6.16.0)",
+    "error": "Simulation reverted: execution reverted (unknown custom error) (action=\"estimateGas\", data=\"0x1c8b6259\", reason=null, transaction={ \"data\": \"0xca1d209d00000000000000000000000000000000000000000000000000000000000f4240\", \"from\": \"0x65F5AFd3b4d5F7d58C408300569a11f0EC190Da6\", \"to\": \"0xD45c61797d7283caf8A31D91A5Bd6465A45AD561\" }, invocation=null, revert=null, code=CALL_EXCEPTION, version=6.16.0)"
+  }
+}
