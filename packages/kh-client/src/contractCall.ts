@@ -5,6 +5,7 @@
 import type { KhClient } from './client.js';
 import { KhError } from './errors.js';
 import { IDEMPOTENCY_HEADER, buildIdempotencyKey } from './idempotency.js';
+import { decodeReportedGas } from './reportedGas.js';
 import { isTerminalStatus } from './types.js';
 import type {
   AttemptRef,
@@ -167,8 +168,7 @@ export async function writeContractCall(
     status,
     transactionHash: str(b['transactionHash']),
     transactionLink: str(b['transactionLink']),
-    gasUsedUnits: str(b['gasUsedWei']),
-    gasPriceWei: str(b['gasPriceWei']),
+    ...decodeReportedGas(b),
     terminal: isTerminalStatus(status),
     httpStatus: response.httpStatus,
     raw: response.body,

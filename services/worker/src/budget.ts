@@ -15,10 +15,22 @@
 //    surfaces `gasUsedUnits` + `gasPriceWei` so the mistake is not reachable;
 //    this module composes the real wei before applying the formula.
 //
-// 2. On Base Sepolia, KeeperHub **sponsors** the transaction: the org wallet's
-//    balance does not move at all. The gas units and the fee in wei are real and
-//    measured; the USD figure is notional at a frozen price; the budget is a
-//    policy limit rather than a claim on a balance. The formula is unchanged.
+// 2. Sponsorship is PARTIAL, so "what was consumed" and "what the wallet paid"
+//    are two different numbers and this module never conflates them (DEC-008,
+//    DEC-010):
+//
+//      consumed  — gasUsed x gasPrice (+ l1Fee), ALWAYS recorded. This is what
+//                  the budget meter tracks and what BUDGET_LOW / exhaustion
+//                  fire on, so the demo mechanic is unaffected by who paid.
+//      debited   — the same figure ONLY when the execution record says
+//                  `sponsored:false`; zero when the paymaster covered it.
+//
+//    KeeperHub runs an ERC-4337 paymaster covering ~$1/month on a free account.
+//    While it holds, `sponsored:true` and the wallet's balance does not move;
+//    once exhausted every write is charged to the org Turnkey wallet. That is
+//    the mechanism behind the mid-run payer switch measured in DEC-006.
+//
+//    The USD figure remains notional at a frozen price on a testnet (G-18).
 
 import { Prisma } from '@convoy/db';
 
@@ -148,25 +160,73 @@ export function canAfford(state: BudgetState, allocation: Allocation): AffordVer
   };
 }
 
+/**
+ * The two figures for one landed attempt. **Never conflated** (DEC-010).
+ *
+ * `consumedUsdc` is what the transaction cost the network to execute; it is
+ * always recorded and it is what the meter drains. `debitedUsdc` is what left
+ * the org Turnkey wallet — the same number when `sponsored === false`, and zero
+ * when KeeperHub's paymaster paid.
+ *
+ * `sponsored: null` means the execution record did not say. The debited figure
+ * is then `null` rather than zero: "we don't know" and "nothing was charged" are
+ * different claims, and only one of them is honest here.
+ */
+export interface GasCharge {
+  readonly consumedUsdc: Prisma.Decimal;
+  readonly debitedUsdc: Prisma.Decimal | null;
+  readonly sponsored: boolean | null;
+}
+
+export function chargeFor(
+  fee: GasFee,
+  runEthUsd: Prisma.Decimal | string,
+  sponsored: boolean | null | undefined,
+): GasCharge {
+  const consumedUsdc = gasUsdc(fee.weiTotal, runEthUsd);
+  const s = sponsored ?? null;
+  return {
+    consumedUsdc,
+    debitedUsdc: s === null ? null : s ? new Prisma.Decimal(0) : consumedUsdc,
+    sponsored: s,
+  };
+}
+
 /** Applying one landed attempt's real gas to the meter. */
 export interface MeterUpdate {
   readonly next: BudgetState;
+  /** Gas consumed, in USDC. What the meter drains. */
   readonly gasUsdc: Prisma.Decimal;
+  /** What the org wallet actually paid. Null when sponsorship is unknown. */
+  readonly debitedUsdc: Prisma.Decimal | null;
+  readonly sponsored: boolean | null;
   /** Emit BUDGET_LOW only on the crossing, not on every subsequent update. */
   readonly crossedLow: boolean;
   readonly exhausted: boolean;
 }
 
+/**
+ * Drain the meter by what was CONSUMED, regardless of who paid.
+ *
+ * Deliberate: if the meter only counted unsponsored writes, the budget mechanic
+ * would silently stop working the moment the paymaster was covering things —
+ * BUDGET_LOW would never fire and exhaustion would never arrive. The budget is a
+ * policy limit on consumption. What the wallet paid is tracked beside it, not
+ * instead of it.
+ */
 export function applyGas(
   state: BudgetState,
   fee: GasFee,
   runEthUsd: Prisma.Decimal | string,
+  sponsored?: boolean | null,
 ): MeterUpdate {
-  const cost = gasUsdc(fee.weiTotal, runEthUsd);
-  const next: BudgetState = { ...state, spentGasUsdc: state.spentGasUsdc.add(cost) };
+  const charge = chargeFor(fee, runEthUsd, sponsored);
+  const next: BudgetState = { ...state, spentGasUsdc: state.spentGasUsdc.add(charge.consumedUsdc) };
   return {
     next,
-    gasUsdc: cost,
+    gasUsdc: charge.consumedUsdc,
+    debitedUsdc: charge.debitedUsdc,
+    sponsored: charge.sponsored,
     crossedLow: !isLow(state) && isLow(next),
     exhausted: isExhausted(next),
   };

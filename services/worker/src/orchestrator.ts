@@ -30,7 +30,8 @@ import {
 } from '@convoy/kh-client';
 
 import { DISTRIBUTOR_ABI, REGISTRY_ABI, decodeRevertSelector } from './abis.js';
-import { canAfford, planExhaustion, type BudgetState } from './budget.js';
+import { canAfford, gasUsdc, planExhaustion, type BudgetState } from './budget.js';
+import { readReceiptGas } from './receipt.js';
 
 export const MAX_ONCHAIN_RETRIES = 2;
 
@@ -306,9 +307,47 @@ export interface ExecuteOutcome {
   readonly idx: number;
   readonly landed: boolean;
   readonly txHash?: string;
+  /** Real total fee in wei, composed from the chain receipt (L2 + L1). */
+  readonly feeWeiTotal?: bigint;
+  /** True when the receipt was read; false when only KeeperHub's figures were available. */
+  readonly feeFromReceipt: boolean;
+  /** Whether the L1 data component is included in `feeWeiTotal` (gap G-28). */
+  readonly l1FeeIncluded: boolean;
+  /** Did the paymaster pay, or the org wallet? Null when the record did not say. */
+  readonly sponsored: boolean | null;
   readonly gasUsedUnits?: string;
   readonly gasPriceWei?: string;
   readonly retries: number;
+}
+
+/**
+ * Compose the real fee for a landed transaction.
+ *
+ * Receipt first — it is chain truth and it carries the L1 data fee KeeperHub
+ * omits. KeeperHub's own figures are the fallback, and only usable when
+ * `sponsored` disambiguated them (gap G-31): `gasUsedUnits` is populated on a
+ * sponsored record, `gasFeeWeiL2` on an unsponsored one, and neither on an
+ * ambiguous one — where the honest answer is no figure at all.
+ */
+async function composeFee(
+  txHash: string,
+  kh: { gasUsedUnits?: string; gasFeeWeiL2?: string; gasPriceWei?: string },
+): Promise<{ weiTotal?: bigint; fromReceipt: boolean; l1FeeIncluded: boolean }> {
+  const receipt = await readReceiptGas(txHash);
+  if (receipt !== undefined) {
+    return { weiTotal: receipt.totalWei, fromReceipt: true, l1FeeIncluded: receipt.l1FeePresent };
+  }
+  if (kh.gasFeeWeiL2 !== undefined) {
+    return { weiTotal: BigInt(kh.gasFeeWeiL2), fromReceipt: false, l1FeeIncluded: false };
+  }
+  if (kh.gasUsedUnits !== undefined && kh.gasPriceWei !== undefined) {
+    return {
+      weiTotal: BigInt(kh.gasUsedUnits) * BigInt(kh.gasPriceWei),
+      fromReceipt: false,
+      l1FeeIncluded: false,
+    };
+  }
+  return { fromReceipt: false, l1FeeIncluded: false };
 }
 
 /**
@@ -323,6 +362,7 @@ export async function executeItem(
   runId: string,
   itemIdx: number,
   runIdOnchain: string,
+  runEthUsd: Prisma.Decimal | string,
 ): Promise<ExecuteOutcome> {
   const log = deps.log ?? ((): void => {});
   const item = await prisma.item.findUniqueOrThrow({
@@ -332,7 +372,14 @@ export async function executeItem(
   // GUARD: COMMITTED requires a prior SIMULATED (+ an APPROVE, from CVY-011).
   if (item.state !== 'SIMULATED') {
     log(`item ${itemIdx}: COMMIT guard blocked — state ${item.state}, not SIMULATED`);
-    return { idx: itemIdx, landed: false, retries: 0 };
+    return {
+      idx: itemIdx,
+      landed: false,
+      feeFromReceipt: false,
+      l1FeeIncluded: false,
+      sponsored: null,
+      retries: 0,
+    };
   }
 
   const commit = await writeContractCall(
@@ -388,15 +435,34 @@ export async function executeItem(
       // `completed` AND a non-null transactionHash from GET /status.
       const final = await pollUntilTerminal(deps.kh, write);
       const detail = await getExecutionStatus(deps.kh, write.executionId);
-      const raw = detail.raw as Record<string, unknown>;
+
+      // `GET /status` is the record that carries `sponsored`; the write POST
+      // often does not. Payer attribution therefore comes from the detail read,
+      // falling back to the write only if the detail omitted it.
+      const sponsored = detail.sponsored ?? final.sponsored ?? null;
+      const fee =
+        final.transactionHash === undefined
+          ? { fromReceipt: false, l1FeeIncluded: false, weiTotal: undefined }
+          : await composeFee(final.transactionHash, {
+              ...(detail.gasUsedUnits !== undefined ? { gasUsedUnits: detail.gasUsedUnits } : {}),
+              ...(detail.gasFeeWeiL2 !== undefined ? { gasFeeWeiL2: detail.gasFeeWeiL2 } : {}),
+              ...(detail.gasPriceWei !== undefined ? { gasPriceWei: detail.gasPriceWei } : {}),
+            });
+      const consumedUsdc =
+        fee.weiTotal === undefined
+          ? null
+          : gasUsdc(new Prisma.Decimal(fee.weiTotal.toString()), runEthUsd);
 
       await recordAttempt(item.id, retries, 'EXECUTE', {
         executionId: write.executionId,
         txHash: final.transactionHash === undefined ? null : hexBytes(final.transactionHash),
         txLink: final.transactionLink ?? null,
         khStatus: final.status,
-        gasUsedWei:
-          final.gasUsedUnits === undefined ? null : new Prisma.Decimal(final.gasUsedUnits),
+        // Real total wei (L2 + L1) from the receipt — NOT KeeperHub's
+        // sponsorship-dependent `gasUsedWei` (gaps G-28, G-31).
+        gasUsedWei: fee.weiTotal === undefined ? null : new Prisma.Decimal(fee.weiTotal.toString()),
+        gasUsedUsdc: consumedUsdc,
+        sponsored,
       });
 
       if (final.status === 'completed' && final.transactionHash !== undefined) {
@@ -409,15 +475,29 @@ export async function executeItem(
           payload: {
             txHash: final.transactionHash,
             txLink: final.transactionLink ?? null,
-            gasUsedUnits: final.gasUsedUnits ?? null,
+            feeWeiTotal: fee.weiTotal === undefined ? null : fee.weiTotal.toString(),
+            feeFromReceipt: fee.fromReceipt,
+            l1FeeIncluded: fee.l1FeeIncluded,
+            sponsored,
+            gasUsdcConsumed: consumedUsdc === null ? null : consumedUsdc.toFixed(6),
+            walletDebitedUsdc:
+              sponsored === null || consumedUsdc === null
+                ? null
+                : sponsored
+                  ? '0.000000'
+                  : consumedUsdc.toFixed(6),
           },
         });
         return {
           idx: itemIdx,
           landed: true,
           txHash: final.transactionHash,
-          gasUsedUnits: final.gasUsedUnits,
-          gasPriceWei: typeof raw['gasPriceWei'] === 'string' ? raw['gasPriceWei'] : undefined,
+          ...(fee.weiTotal === undefined ? {} : { feeWeiTotal: fee.weiTotal }),
+          feeFromReceipt: fee.fromReceipt,
+          l1FeeIncluded: fee.l1FeeIncluded,
+          sponsored,
+          ...(detail.gasUsedUnits === undefined ? {} : { gasUsedUnits: detail.gasUsedUnits }),
+          ...(detail.gasPriceWei === undefined ? {} : { gasPriceWei: detail.gasPriceWei }),
           retries,
         };
       }
@@ -431,7 +511,14 @@ export async function executeItem(
         type: 'ITEM_FAILED',
         payload: { reason: `status ${final.status}, hash ${final.transactionHash ?? 'null'}` },
       });
-      return { idx: itemIdx, landed: false, retries };
+      return {
+        idx: itemIdx,
+        landed: false,
+        feeFromReceipt: false,
+        l1FeeIncluded: false,
+        sponsored,
+        retries,
+      };
     } catch (e) {
       // RETRYING only on a transient code, capped. A config-revert never retries.
       if (isTransient(e) && retries < MAX_ONCHAIN_RETRIES) {
@@ -459,7 +546,14 @@ export async function executeItem(
           retried: retries,
         },
       });
-      return { idx: itemIdx, landed: false, retries };
+      return {
+        idx: itemIdx,
+        landed: false,
+        feeFromReceipt: false,
+        l1FeeIncluded: false,
+        sponsored: null,
+        retries,
+      };
     }
   }
 }

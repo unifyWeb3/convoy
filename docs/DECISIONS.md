@@ -473,3 +473,91 @@ off.** CVY-010 replaces the plan source; CVY-011 layers the LLM Critic **on top 
 simulator remains the corroborating verifier, and any VETO(would_revert) must still be backed by
 `simulate.wouldRevert = true`. Nothing here is staged: the veto observed in acceptance is
 `RootNotSet()`, decoded from selector `0x1c8b6259`, raised by the contract's own precondition.
+
+---
+
+**DEC-008 2026-08-04: sponsorship is an ERC-4337 paymaster on a metered free allowance, not a
+property of the chain. When it lapses, the org Turnkey wallet pays.**
+
+**Source: KeeperHub, reported — not measured by Convoy.** Recorded as an explanation supplied by the
+vendor, and labelled as such because this repository's whole discipline is the difference between the
+two. What Convoy measured is DEC-006; what KeeperHub supplied is the mechanism behind it.
+
+- KeeperHub runs an **ERC-4337 paymaster** that covers roughly **$1/month per free account**, spent
+  on early runs.
+- Once that allowance is exhausted, **every subsequent write is charged to the org Turnkey wallet**.
+- `gasUsedWei` reports **real gas consumed either way**. It indicates **usage, not payer**.
+
+**This is consistent with the measurement and explains its most confusing feature.** DEC-006 found 11
+of 12 concurrent writes sent by a relay and one sent by the org wallet, mid-run, with nothing else
+changing. A metered allowance running out part-way through a burst produces exactly that: the switch
+is a budget boundary, not a routing decision, which is why it fell in the middle of a batch of
+identical calls.
+
+**Consequences, all of them already load-bearing:**
+
+1. **DEC-004 is superseded on the point of payment.** "KeeperHub sponsors; the org wallet's balance
+   does not move" was measured on one transaction while the allowance still held. It describes a
+   _state_, not a _rule_, and that state expires.
+2. **The runbook's org-wallet funding threshold is load-bearing.** An unfunded wallet does not
+   degrade gracefully once the allowance lapses — writes stop.
+3. **Payer must be recorded per execution, not assumed per run.** The flag flips mid-run. See
+   DEC-010.
+
+---
+
+**DEC-009 2026-08-04: the demo narration attributes serialization to KeeperHub, not to the org
+wallet. G-30 is CLOSED by this entry.**
+
+The approved claim for CVY-019, to be used verbatim in narration and README copy:
+
+> **Convoy submits concurrently; KeeperHub serializes onto a single sequential nonce** — strictly
+> increasing, one transaction per block, never batched — **measured identical at dispatch width 4 and 12.**
+
+**Every clause is measured** (DEC-006, DEC-007): strictly increasing nonces 2485–2488 / 2493–2496 /
+2501–2503, successive ~2 s blocks, 12/12 landed at both widths in 75.5 s and 77.8 s.
+
+**What must NOT be claimed:** that the sender is the org Turnkey wallet. It is a KeeperHub relay
+EOA (`0x6331eb45…091e99` on the measured batch), and a judge opening any hash on Basescan sees that
+`from`. The claim above is stronger anyway — it names the property that matters (deterministic
+serialization) and drops the one that was never load-bearing (which address holds the nonce). Backup
+path d depends on serialization, which survives untouched.
+
+**Superseded frozen text — do not "correct" this back.** `docs/ARCHITECTURE.md` §15 narrates
+_"one wallet, one sequential nonce"_ and attributes the serialization to the org Turnkey wallet.
+§15 is frozen and still reads that way. **This entry supersedes it for that clause only.** The
+fanout comparison table is preserved in the README as the supporting artifact.
+
+---
+
+**DEC-010 2026-08-04: the meter records two figures — gas CONSUMED and wei DEBITED FROM THE WALLET —
+and never conflates them.**
+
+| Figure                  | Definition                                                                                  | Recorded                                                        |
+| ----------------------- | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| **consumed**            | `gasUsed × effectiveGasPrice + l1Fee`, from the chain receipt                               | **Always.** Drains the budget; drives BUDGET_LOW and exhaustion |
+| **debited from wallet** | the same figure **only** when the execution record says `sponsored:false`; zero when `true` | Per attempt; summed per run                                     |
+
+Budget exhaustion tracks **consumed**, deliberately. A meter that counted only unsponsored writes
+would stop working the moment the paymaster was covering things — BUDGET_LOW would never fire and
+exhaustion would never arrive. The budget is a policy limit on consumption; what the wallet paid is
+tracked beside it, never instead of it.
+
+**`sponsored: null` means unknown, and yields a null debit rather than a zero one.** "Nothing was
+charged" and "we do not know what was charged" are different claims, and only one of them is honest.
+
+**Where the numbers come from.** Both figures are composed from `eth_getTransactionReceipt` via
+`BASE_RPC_URL` — the same artifact a judge opens on Basescan — not from KeeperHub's reported gas.
+KeeperHub's figures are recorded alongside as corroboration. This closes the gap between what
+`services/worker/src/budget.ts` documented at CVY-007 (an L1 fee read from the receipt) and what the
+code actually did (`composeGasFeeWei` was called with no `l1FeeWei`, so `l1FeeIncluded` was always
+false in the live path).
+
+**Schema amendment.** `attempts` gains one nullable column, `sponsored boolean`. The wallet-debited
+total is **derived** — `sum(gas_used_usdc) where sponsored = false` — not stored; a stored total
+could disagree with its own rows. `attempts.gas_used_wei` now holds the real total fee in wei, and
+`gas_used_usdc` is populated for the first time.
+
+**Rows written before this entry hold gas UNITS in `gas_used_wei`, and are NOT migrated.**
+Back-filling would require re-reading every receipt and would silently rewrite evidence already cited
+in the CVY-007 and CVY-008 milestone reports. `sponsored IS NULL` identifies those rows exactly.

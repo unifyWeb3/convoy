@@ -61,6 +61,7 @@ describe('getExecutionStatus', () => {
           transactionHash: '0xabc',
           transactionLink: 'https://sepolia.basescan.org/tx/0xabc',
           gasUsedWei: '31000',
+          sponsored: true,
         },
         headers: { 'X-Poll-Interval-Hint': '0' },
       },
@@ -122,6 +123,7 @@ describe('pollUntilTerminal', () => {
             transactionHash: '0x9450',
             transactionLink: 'https://sepolia.basescan.org/tx/0x9450',
             gasUsedWei: '74093',
+            sponsored: true,
           }),
           { status: 200, headers: { 'X-Poll-Interval-Hint': '0' } },
         );

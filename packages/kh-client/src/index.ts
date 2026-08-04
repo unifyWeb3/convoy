@@ -28,6 +28,9 @@ export {
   writeContractCall,
 } from './contractCall.js';
 
+export { decodeReportedGas, extractSponsored } from './reportedGas.js';
+export type { ReportedGas } from './reportedGas.js';
+
 export { CHECK_AND_EXECUTE_PATH, checkAndExecute } from './checkAndExecute.js';
 export type { CheckAndExecuteParams } from './checkAndExecute.js';
 
@@ -64,6 +67,7 @@ export type {
   ContractCallWireBody,
   ExecutionStatus,
   KhMode,
+  ReportedGasMeaning,
   SimulateResult,
   StatusResult,
   WriteResult,

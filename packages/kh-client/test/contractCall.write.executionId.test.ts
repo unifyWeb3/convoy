@@ -41,13 +41,16 @@ describe('write — executionId', () => {
       transactionHash: '0xdead',
       transactionLink: 'https://sepolia.basescan.org/tx/0xdead',
       gasUsedWei: '21000',
+      sponsored: true,
     });
 
     const result = await writeContractCall(client, PARAMS, REF);
 
     expect(result.executionId).toBe('direct_abc123');
     expect(result.transactionHash).toBe('0xdead');
+    // `sponsored:true` is what makes `gasUsedWei` readable as units (gap G-31).
     expect(result.gasUsedUnits).toBe('21000');
+    expect(result.gasFeeWeiL2).toBeUndefined();
   });
 
   it('marks a synchronous completed write terminal so the poll is skipped (gap G-02)', async () => {

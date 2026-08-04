@@ -1,6 +1,6 @@
-# Convoy Implementation Status (updated 2026-08-03)
+# Convoy Implementation Status (updated 2026-08-04)
 
-Overall: **45% (CVY-000…CVY-008 done; DEC-001…DEC-007 applied)** Next milestone: **CVY-GATE1 — thin slice, real tx landed via Convoy**
+Overall: **50% (CVY-000…CVY-008 done, GATE 1 PASSED; DEC-001…DEC-010 applied)** Next milestone: **CVY-010 — Planner**
 
 **The submission requirement is provisionally met.** Both contracts are deployed and
 Basescan-verified on Base Sepolia, and `openRun` landed through the org Turnkey wallet:
@@ -10,33 +10,33 @@ Addresses and evidence: [`docs/RUNBOOK_FIRST_TRANSACTION.md`](RUNBOOK_FIRST_TRAN
 **Execution chain: Base Sepolia (84532)** per DEC-001. Base mainnet (8453) is an optional final demo
 target at CVY-019, not the development target.
 
-| ID        | Milestone                                                   | Status      | %   | Notes                                                                    |
-| --------- | ----------------------------------------------------------- | ----------- | --- | ------------------------------------------------------------------------ |
-| CVY-000   | Repo bootstrap + toolchain                                  | DONE        | 100 | Monorepo builds empty; `.convoy/` populated; CI grep-guards live         |
-| CVY-001   | Contracts + Foundry unit/invariant tests                    | DONE        | 100 | 45 tests green; invariants at runs=1000 depth=32; gap G-10 recorded      |
-| CVY-002   | payloadHash parity (Sol↔TS) + deploy script                 | DONE        | 100 | 13 dumped fixtures, 47 parity assertions; deploy script written, not run |
-| DEC-001   | _Amendment_ — execution chain → Base Sepolia 84532          | DONE        | 100 | Not a milestone; a scoped spec amendment. See docs/DECISIONS.md          |
-| CVY-004   | kh-client: write + simulate + status + errors + idempotency | DONE        | 100 | 114 tests; live smoke on 84532; drift G-20…G-23 recorded                 |
-| CVY-003   | Deploy+verify on Base Sepolia; **FIRST REAL BASE TX**       | DONE        | 100 | Both verified; openRun landed. D-019 closed, G-20 mitigated              |
-| CVY-005   | DB package: Prisma schema, migrations, seed                 | TODO        | 0   |                                                                          |
-| CVY-006   | BullMQ queue + worker + idempotent handlers                 | TODO        | 0   |                                                                          |
-| CVY-007   | Budget meter + gas→USDC accounting                          | TODO        | 0   |                                                                          |
-| CVY-008   | Orchestrator + RUN/ITEM state machine                       | TODO        | 0   | Core; blocks all run behaviour                                           |
-| CVY-GATE1 | **GATE 1** — thin slice, real tx landed via Convoy          | NOT REACHED | 0   | Fail → stop features, cut #1 and #2                                      |
-| CVY-009   | SSE timeline UI + audit drawer + replay                     | TODO        | 0   | Never cut                                                                |
-| CVY-010   | Planner + zod schema + repair + eval                        | TODO        | 0   | Recall ≥0.9                                                              |
-| CVY-011   | Critic + simulate veto + corroboration                      | TODO        | 0   | Zero false vetoes; never cut                                             |
-| CVY-012   | Manifest exporter: 3-way reconcile + sha256                 | TODO        | 0   |                                                                          |
-| CVY-GATE2 | **GATE 2** — full 12-item run, manifest, DAG                | NOT REACHED | 0   | Fail → freeze P1, cut #2 and #5                                          |
-| CVY-013   | DAG view + deferral + onchain check-and-execute gate        | TODO        | 0   | P1                                                                       |
-| CVY-014   | Human approval gate                                         | TODO        | 0   | P1                                                                       |
-| CVY-015   | Idempotency + crash-resume + kill-worker test               | TODO        | 0   | Never cut                                                                |
-| CVY-016   | Ablation harness + README honesty table                     | TODO        | 0   |                                                                          |
-| CVY-017   | x402 payment leg                                            | TODO        | 0   | P1; gated on G-06, cuttable                                              |
-| CVY-018   | Telegram notifications                                      | TODO        | 0   | P2; omit if time is short                                                |
-| CVY-019   | Demo E2E + backup paths + video + SUBMIT                    | TODO        | 0   | Deadline Aug 13 2026 12:00 UTC+2; optional 8453 flip is a stretch step   |
+| ID        | Milestone                                                   | Status      | %   | Notes                                                                     |
+| --------- | ----------------------------------------------------------- | ----------- | --- | ------------------------------------------------------------------------- |
+| CVY-000   | Repo bootstrap + toolchain                                  | DONE        | 100 | Monorepo builds empty; `.convoy/` populated; CI grep-guards live          |
+| CVY-001   | Contracts + Foundry unit/invariant tests                    | DONE        | 100 | 45 tests green; invariants at runs=1000 depth=32; gap G-10 recorded       |
+| CVY-002   | payloadHash parity (Sol↔TS) + deploy script                 | DONE        | 100 | 13 dumped fixtures, 47 parity assertions; deploy script written, not run  |
+| DEC-001   | _Amendment_ — execution chain → Base Sepolia 84532          | DONE        | 100 | Not a milestone; a scoped spec amendment. See docs/DECISIONS.md           |
+| CVY-004   | kh-client: write + simulate + status + errors + idempotency | DONE        | 100 | 114 tests; live smoke on 84532; drift G-20…G-23 recorded                  |
+| CVY-003   | Deploy+verify on Base Sepolia; **FIRST REAL BASE TX**       | DONE        | 100 | Both verified; openRun landed. D-019 closed, G-20 mitigated               |
+| CVY-005   | DB package: Prisma schema, migrations, seed                 | DONE        | 100 | 5 frozen models; append-only events guard; 3- and 12-item fixtures seeded |
+| CVY-006   | BullMQ queue + worker + idempotent handlers                 | DONE        | 100 | jobId dedupe, graceful SIGTERM; DEC-002 fan-out constant; gaps G-26/G-27  |
+| CVY-007   | Budget meter + gas→USDC accounting                          | DONE        | 100 | Pinned formula; BUDGET_LOW at 20%; payer split added at DEC-010           |
+| CVY-008   | Orchestrator + RUN/ITEM state machine                       | DONE        | 100 | 3-item batch RECEIVED→SEALED_OK on 84532; DEC-006/007 measured; gap G-29  |
+| CVY-GATE1 | **GATE 1** — thin slice, real tx landed via Convoy          | **PASSED**  | 100 | Called by the operator 2026-08-04                                         |
+| CVY-009   | SSE timeline UI + audit drawer + replay                     | TODO        | 0   | Never cut                                                                 |
+| CVY-010   | Planner + zod schema + repair + eval                        | TODO        | 0   | Recall ≥0.9                                                               |
+| CVY-011   | Critic + simulate veto + corroboration                      | TODO        | 0   | Zero false vetoes; never cut                                              |
+| CVY-012   | Manifest exporter: 3-way reconcile + sha256                 | TODO        | 0   |                                                                           |
+| CVY-GATE2 | **GATE 2** — full 12-item run, manifest, DAG                | NOT REACHED | 0   | Fail → freeze P1, cut #2 and #5                                           |
+| CVY-013   | DAG view + deferral + onchain check-and-execute gate        | TODO        | 0   | P1                                                                        |
+| CVY-014   | Human approval gate                                         | TODO        | 0   | P1                                                                        |
+| CVY-015   | Idempotency + crash-resume + kill-worker test               | TODO        | 0   | Never cut                                                                 |
+| CVY-016   | Ablation harness + README honesty table                     | TODO        | 0   |                                                                           |
+| CVY-017   | x402 payment leg                                            | TODO        | 0   | P1; gated on G-06, cuttable                                               |
+| CVY-018   | Telegram notifications                                      | TODO        | 0   | P2; omit if time is short                                                 |
+| CVY-019   | Demo E2E + backup paths + video + SUBMIT                    | TODO        | 0   | Deadline Aug 13 2026 12:00 UTC+2; optional 8453 flip is a stretch step    |
 
-**Gates:** GATE1 not reached · GATE2 not reached
+**Gates:** GATE1 **PASSED** 2026-08-04 · GATE2 not reached
 
 ## Critical path
 

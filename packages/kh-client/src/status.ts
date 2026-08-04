@@ -3,6 +3,7 @@
 // This package is the ONLY module permitted to reach app.keeperhub.com.
 
 import type { KhClient } from './client.js';
+import { decodeReportedGas } from './reportedGas.js';
 import { isTerminalStatus } from './types.js';
 import type { StatusResult, WriteResult } from './types.js';
 
@@ -43,8 +44,7 @@ export async function getExecutionStatus(
     status,
     transactionHash: s(b['transactionHash']),
     transactionLink: s(b['transactionLink']),
-    gasUsedUnits: s(b['gasUsedWei']),
-    gasPriceWei: s(b['gasPriceWei']),
+    ...decodeReportedGas(b),
     // A 0 hint is an explicit terminal signal even if the status string lags.
     terminal: isTerminalStatus(status) || hintMs === 0,
     pollIntervalHintMs: hintMs,
@@ -87,8 +87,14 @@ export async function pollUntilTerminal(
       status: write.status,
       transactionHash: write.transactionHash,
       transactionLink: write.transactionLink,
-      gasUsedUnits: write.gasUsedUnits,
-      gasPriceWei: write.gasPriceWei,
+      ...(write.gasUsedUnits !== undefined ? { gasUsedUnits: write.gasUsedUnits } : {}),
+      ...(write.gasFeeWeiL2 !== undefined ? { gasFeeWeiL2: write.gasFeeWeiL2 } : {}),
+      ...(write.gasReportedRaw !== undefined ? { gasReportedRaw: write.gasReportedRaw } : {}),
+      ...(write.gasReportedMeaning !== undefined
+        ? { gasReportedMeaning: write.gasReportedMeaning }
+        : {}),
+      ...(write.gasPriceWei !== undefined ? { gasPriceWei: write.gasPriceWei } : {}),
+      ...(write.sponsored !== undefined ? { sponsored: write.sponsored } : {}),
       terminal: true,
       raw: write.raw,
     };

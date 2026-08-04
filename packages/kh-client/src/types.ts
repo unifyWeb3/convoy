@@ -102,23 +102,61 @@ export function isTerminalStatus(s: string): boolean {
 }
 
 /**
+ * What KeeperHub's `gasUsedWei` field carries on THIS execution.
+ *
+ * The field is polymorphic and the discriminator is `sponsored` (gap G-31),
+ * measured against chain receipts on three transactions:
+ *
+ * | `sponsored` | `gasUsedWei` is        | verified against                       |
+ * | ----------- | ---------------------- | -------------------------------------- |
+ * | `true`      | gas **UNITS**          | `receipt.gasUsed` exactly              |
+ * | `false`     | the **L2 fee in wei**  | `gasUsed × effectiveGasPrice` exactly  |
+ *
+ * A consumer that assumes either reading is wrong roughly six million times on
+ * the other branch. Hence the two mutually-exclusive fields below: whichever one
+ * is populated is safe to use as its name says, and neither is guessed.
+ */
+export type ReportedGasMeaning = 'units' | 'weiL2' | 'ambiguous';
+
+interface ReportedGasFields {
+  /**
+   * Gas units — populated **only** when `sponsored === true`, where the field
+   * provably equals `receipt.gasUsed`.
+   */
+  readonly gasUsedUnits?: string;
+  /**
+   * L2 fee in wei — populated **only** when `sponsored === false`, where the
+   * field provably equals `gasUsed × effectiveGasPrice`. Excludes the L1 data
+   * fee, which KeeperHub never reports at all (gap G-28).
+   */
+  readonly gasFeeWeiL2?: string;
+  /** KeeperHub's `gasUsedWei` verbatim, for the audit drawer. */
+  readonly gasReportedRaw?: string;
+  /** How `gasReportedRaw` was interpreted. `ambiguous` when `sponsored` is absent. */
+  readonly gasReportedMeaning?: ReportedGasMeaning;
+  /** Wei per gas unit, from KeeperHub's `gasPriceWei`. */
+  readonly gasPriceWei?: string;
+  /**
+   * Did KeeperHub's ERC-4337 paymaster pay, or the org Turnkey wallet?
+   *
+   * `false` means the wallet was debited (DEC-008). Read from the top-level
+   * field: `result.sponsored` is **absent** on unsponsored records, while
+   * `result.executedCall.sponsored` agrees with the top level on all three
+   * measured executions.
+   */
+  readonly sponsored?: boolean;
+}
+
+/**
  * Result of a write. Writes execute SYNCHRONOUSLY (gap G-02): the POST returns
  * 202 with a status that is often already terminal, so the status poll must be
  * short-circuited rather than always run.
  */
-export interface WriteResult {
+export interface WriteResult extends ReportedGasFields {
   readonly executionId: string;
   readonly status: ExecutionStatus | string;
   readonly transactionHash?: string;
   readonly transactionLink?: string;
-  /**
-   * **Gas UNITS, not wei.** KeeperHub's field is named `gasUsedWei` but carries
-   * the receipt's `gasUsed` — measured identical on two transactions (gap
-   * G-28). Renamed here so a consumer cannot divide units by 1e18.
-   */
-  readonly gasUsedUnits?: string;
-  /** Wei per gas unit, from KeeperHub's `gasPriceWei`. */
-  readonly gasPriceWei?: string;
   /** True when the POST response is already terminal and no poll is needed. */
   readonly terminal: boolean;
   readonly httpStatus: number;
@@ -126,15 +164,11 @@ export interface WriteResult {
 }
 
 /** Result of `GET /api/execute/{id}/status`. */
-export interface StatusResult {
+export interface StatusResult extends ReportedGasFields {
   readonly executionId: string;
   readonly status: ExecutionStatus | string;
   readonly transactionHash?: string;
   readonly transactionLink?: string;
-  /** **Gas UNITS, not wei** — see WriteResult.gasUsedUnits and gap G-28. */
-  readonly gasUsedUnits?: string;
-  /** Wei per gas unit. */
-  readonly gasPriceWei?: string;
   readonly terminal: boolean;
   /**
    * From the `X-Poll-Interval-Hint` header. **0 means terminal** — stop polling.

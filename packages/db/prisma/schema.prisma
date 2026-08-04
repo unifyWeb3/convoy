@@ -97,9 +97,23 @@ model Attempt {
   txHash      Bytes?  @map("tx_hash")
   txLink      String? @map("tx_link")
 
-  /// Wei — unconstrained numeric, never a float and never a JS number.
+  /// Real total fee in wei (L2 execution + OP-stack L1 data), composed from the
+  /// chain receipt — never from KeeperHub's `gasUsedWei`, whose meaning flips
+  /// with sponsorship (gap G-31). Unconstrained numeric, never a float and never
+  /// a JS number.
+  ///
+  /// **Rows written before DEC-010 hold gas UNITS in this column.** They are not
+  /// migrated: back-filling would require re-reading every receipt and would
+  /// silently rewrite evidence already cited in milestone reports. `sponsored IS
+  /// NULL` identifies them exactly.
   gasUsedWei  Decimal? @map("gas_used_wei") @db.Decimal
   gasUsedUsdc Decimal? @map("gas_used_usdc") @db.Decimal(20, 6)
+
+  /// Did KeeperHub's paymaster pay, or did the org Turnkey wallet? Straight from
+  /// the execution record (DEC-008). This is the ONLY thing separating gas
+  /// *consumed* from wei *debited from the wallet* — false means the wallet paid
+  /// `gas_used_wei` itself. Null on pre-DEC-010 rows, where it was not recorded.
+  sponsored Boolean? @map("sponsored")
 
   /// Critic evidence, straight from KeeperHub's simulate response.
   wouldRevert  Boolean? @map("would_revert")
