@@ -27,6 +27,23 @@ for web and worker releases.
 | Rollback               | See below.                                                                                                                                                     |
 | Final demo deploy      | Deploy the morning of on 84532; run a real morning batch whose hashes land on Basescan (backup path a); then freeze the environment.                           |
 
+## KeeperHub authentication — two paths, deliberately separate
+
+| Surface                         | Auth                   | Used by                                       |
+| ------------------------------- | ---------------------- | --------------------------------------------- |
+| Interactive Claude Code session | Browser **OAuth 2.1**  | developers; the judged MCP evaluation surface |
+| Headless runtime                | `kh_` **Bearer** token | `packages/kh-client`, `services/worker`, CI   |
+
+Both reach the same endpoint, `https://app.keeperhub.com/mcp`; only the credential differs. Full
+detail and the plugin inventory: [`.convoy/mcp/README.md`](../.convoy/mcp/README.md).
+
+**The runtime never uses OAuth, and this is a constraint rather than a preference.** The worker and
+the client run unattended — no browser, no human, no consent screen — so an OAuth flow would block
+forever on a sign-in nobody is there to complete. CVY-004's execution path depends on Bearer auth.
+The KeeperHub Claude Code plugin is a development convenience and an evaluation surface; it must
+never become a runtime dependency. The test of that boundary: uninstalling the plugin must leave
+Convoy's execution completely unaffected.
+
 ## Basescan verification
 
 Verification uses the **single Etherscan API V2 key** (`ETHERSCAN_API_KEY`). Legacy per-chain
