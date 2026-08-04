@@ -6,7 +6,9 @@ contract rows are implemented and green — 45 Foundry tests, invariants at `run
 of CVY-002 the payloadHash-parity row is green too — 47 assertions over 13 dumped fixtures. As of
 CVY-004 the kh-client row is green — 118 tests total in that package, over tapes recorded from the
 live API. As of CVY-005 the DB row is green — 35 tests reading the applied schema back out of
-Postgres rather than trusting `schema.prisma`.
+Postgres rather than trusting `schema.prisma`. As of CVY-006 the queue row is green — 22 tests
+against a real BullMQ worker and a real Redis, because durability and stalled-job behaviour cannot
+be faked with a mock.
 
 ## Catalog
 

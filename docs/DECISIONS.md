@@ -293,3 +293,66 @@ function, args and idx rather than asserting a literal. The 12-item fixture also
 **genuinely invalid** items (a duplicate `enableMarket` and a second `setRoot`) whose reverts —
 `MarketAlreadyEnabled()` and `RootAlreadySet()` — come from the contract's own preconditions. Nothing
 is staged.
+
+**DEC-002 2026-08-04: EXECUTE-phase dispatch fans out concurrently. `.convoy/tasks/CVY-006.md`'s
+"concurrency 1 per run" is superseded.**
+
+The CVY-006 card said "Concurrency **1 per run** — submissions serialize against the single org
+wallet". Taken literally that inverts the architecture and would hollow out the demo.
+
+`docs/ARCHITECTURE.md` requires the opposite in four separate places:
+
+- §3 capability table — "One org wallet = one sequential nonce; **concurrent submits genuinely
+  serialize**. [Without it] the reliability demo has no substrate."
+- §4 step 6 — "**Contention is real:** deferred-now-ready items are **submitted concurrently**
+  against the one org wallet; KeeperHub serializes them on the single nonce."
+- §13 risk table — "Convoy _submits_ concurrency; KeeperHub _serializes_ it — the honest contention
+  story."
+- §15 demo script, 1:00–2:00 — "Convoy submits the ready items concurrently; KeeperHub serializes
+  them on the nonce."
+
+**Serial submission would make the narration an overclaim.** If Convoy submits one at a time there is
+no contention, nothing for KeeperHub's nonce manager to resolve, and the sentence "KeeperHub
+serializes them" describes an event that did not happen. It also removes the demo's _deterministic_
+reliability beat: backup path d (§15) explicitly relies on nonce-serialization of concurrent submits
+being reproducible when a live transient retry does not occur. Golden rule 1 applies — the
+architecture wins and the card is the thing that is wrong.
+
+**Resolution — implementation-level, not an architecture change:**
+
+- **Run-level phase orchestration stays serial.** One run's state machine advances one phase at a
+  time: PLAN → CRITIQUE → EXECUTE → SEAL. Nothing here changes.
+- **Within EXECUTE, dispatch of ready items fans out.** The card's "serialize against the single org
+  wallet" is right about _where_ serialization happens — it happens at KeeperHub, on the nonce, not
+  in Convoy's dispatcher. That is the whole point.
+- The fan-out is a **named constant with a documented default**, never a hardcoded 1:
+
+  | Constant             | Where                           | Env override                | Default |
+  | -------------------- | ------------------------------- | --------------------------- | ------- |
+  | `EXECUTE_FANOUT`     | `services/worker/src/config.ts` | `CONVOY_EXECUTE_FANOUT`     | `4`     |
+  | `WORKER_CONCURRENCY` | `services/worker/src/config.ts` | `CONVOY_WORKER_CONCURRENCY` | `4`     |
+
+  `WORKER_CONCURRENCY` is clamped to at least `EXECUTE_FANOUT`: a worker that processes fewer jobs
+  at once than the fan-out asks for silently re-serializes the dispatch, which is exactly the bug
+  this decision exists to prevent.
+
+**The default of 4 is provisional and is chosen properly at CVY-008**, where the EXECUTE phase
+actually exists and the number can be measured against a real 12-item batch. 4 is enough to produce
+genuine nonce contention and small enough to stay clear of the observed KeeperHub rate limit
+(`x-ratelimit-limit: 60`). CVY-006 ships the constant and the plumbing; it does not ship a tuned
+value, because there is nothing yet to tune it against.
+
+**DEC-003 2026-08-04: the idempotency attempt number is fixed in the job payload at enqueue time,
+never derived at handler runtime.**
+
+BullMQ re-picks a stalled job after `stalledInterval` (~30s default). The re-picked job runs the same
+handler again, and if that handler computed its attempt number from anything mutable — a count of
+`attempts` rows, `job.attemptsMade`, a clock — it would produce a _different_
+`Idempotency-Key: <runId>:<idx>:<attempt>` and KeeperHub would treat the retry as a **new write**.
+That is a double-submission, on chain, with real money, from a process that believed it was being
+careful.
+
+The attempt number therefore travels in `job.data` and is fixed when the job is enqueued. A re-picked
+stalled job carries byte-identical data, produces the identical idempotency key, and KeeperHub's
+per-org 24h window collapses it to one execution. A genuine Convoy-side retry enqueues a _new_ job
+with `attempt + 1` and deliberately gets a new key. See gap **G-26**.

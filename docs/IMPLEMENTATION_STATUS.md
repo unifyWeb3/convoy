@@ -1,6 +1,6 @@
 # Convoy Implementation Status (updated 2026-08-03)
 
-Overall: **30% (CVY-000…CVY-005 done; DEC-001 applied)** Next milestone: **CVY-006 — BullMQ queue + worker + idempotent handlers**
+Overall: **35% (CVY-000…CVY-006 done; DEC-001/002/003 applied)** Next milestone: **CVY-007 — Budget meter + gas→USDC accounting**
 
 **The submission requirement is provisionally met.** Both contracts are deployed and
 Basescan-verified on Base Sepolia, and `openRun` landed through the org Turnkey wallet:

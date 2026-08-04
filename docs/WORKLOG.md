@@ -439,3 +439,58 @@ transaction reads `0x65F5AFd3b4d5F7d58C408300569a11f0EC190Da6` — byte-identica
 reports, and that address was `msg.sender` in a real Basescan-verified transaction. `verify-env` runs
 a live simulate on every invocation reporting the same sender, with no 422 ever observed. The flag
 means "externally-added address", not "unprovisioned".
+
+---
+
+## CVY-006 — 2026-08-04 — BullMQ queue + worker + idempotent handler skeleton
+
+One queue, four wired phase handlers, jobId dedupe, graceful shutdown. **22 tests against a real
+BullMQ worker and a real Redis** — durability and stalled-job behaviour are claims about what the
+library actually does, so a mock would only prove the mock agrees with itself.
+
+**DEC-002 — the card was wrong and is superseded.** `.convoy/tasks/CVY-006.md` said "Concurrency
+**1 per run** — submissions serialize against the single org wallet". Taken literally that inverts
+the architecture, which requires the opposite in four separate places (§3 capability table, §4 step
+6, §13 risk table, §15 demo script): _"Convoy submits the ready items concurrently; KeeperHub
+serializes them on the nonce."_ Serial submission leaves nothing to serialize — the narration would
+describe an event that did not happen, and backup path d loses its **deterministic** reliability beat.
+Golden rule 1: architecture wins, the card is what is wrong.
+
+Resolution is implementation-level. Run-level phase orchestration stays serial (PLAN → CRITIQUE →
+EXECUTE → SEAL); within EXECUTE, dispatch fans out. `EXECUTE_FANOUT` and `WORKER_CONCURRENCY` live in
+`services/worker/src/config.ts` with env overrides and a documented **provisional** default of 4 —
+tuned properly at CVY-008 against a real 12-item batch. `WORKER_CONCURRENCY` is clamped to at least
+`EXECUTE_FANOUT`, because a worker narrower than the fan-out silently re-serializes dispatch and
+everything would still appear to work. A test observes peak in-flight handlers rather than asserting
+the constant back to itself.
+
+**DEC-003 / G-26 — the attempt number is fixed in `job.data` at enqueue.** BullMQ re-picks a stalled
+job after ~30s. If a handler recomputed its attempt from a row count or from `job.attemptsMade`
+(which BullMQ **increments** on stall), the re-picked job would build a different
+`Idempotency-Key: <runId>:<idx>:<attempt>` and KeeperHub would treat it as a **new write** — a double
+submission on chain from the crash-resume path that exists to prevent exactly that. Fixing the
+attempt in the payload makes a re-picked job byte-identical, so the key is identical and KeeperHub's
+per-org 24h window collapses it to one execution. Reconcile-before-act is still owed at CVY-015;
+idempotency prevents a duplicate submission, it does not tell Convoy what happened to the original.
+
+**G-27 — BullMQ's job id has a two-colon budget.** Found by an enqueue failing, not by reading docs:
+BullMQ 6 throws `Custom Id cannot contain :` past two colons, and the frozen scheme
+`runId:phase:itemIdx` spends exactly both. The id is **at its limit as designed** — fine today, and a
+trap the first time someone appends `:attempt` for a retry, which fails only at the moment a retry is
+first needed. Measured directly: `a:b:0` accepted, `a:b:0:1` rejected, `a:b:0#1` accepted. Retry ids
+use `#`, and `buildJobId` rejects a `runId` containing `:` or `#` so the budget cannot be overspent
+from the other end.
+
+**`removeOnComplete: false`, deliberately.** BullMQ frees a jobId when the job is removed, so
+removing on completion would make "a duplicate jobId does not double-run" quietly false the moment a
+job finished. A test re-enqueues an identical key _after_ completion and asserts the handler ran once.
+
+**`msgpackr-extract` denied.** BullMQ pulls it transitively and it wants an install script. It is an
+_optional_ native accelerator — msgpackr falls back to JavaScript and works correctly — so under the
+deny-by-default policy it gets `false`, not a reflex `true`.
+
+Manual verification of the real bootstrap: starts `concurrency=4 stalledInterval=30000ms`, SIGTERM
+logs `draining in-flight jobs` then `drained cleanly`. Shutdown also reports a **forced** close
+honestly rather than claiming a drain that did not happen — a test pins that too.
+
+Decisions DEC-002, DEC-003. Gaps G-26, G-27. **Next: CVY-007.**
