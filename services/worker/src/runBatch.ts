@@ -12,8 +12,8 @@ import { KhClient } from '@convoy/kh-client';
 import { EXECUTE_FANOUT } from './config.js';
 import { applyGas, remaining, type BudgetState, type GasFee } from './budget.js';
 import {
-  critiqueItem,
   executeItem,
+  phaseCritique,
   phaseOpen,
   phasePlan,
   phaseSeal,
@@ -93,21 +93,22 @@ export async function runBatch(
   const openTx = await phaseOpen(deps, runId, runIdOnchain);
   await phasePlan(runId);
 
-  // CRITIQUING — every non-deferred item, zero gas.
-  const planned = await prisma.item.findMany({
-    where: { runId, state: 'PLANNED' },
-    orderBy: { idx: 'asc' },
-  });
-  const vetoed: { idx: number; reason: string }[] = [];
-  const ready: number[] = [];
-  for (const item of planned) {
-    const v = await critiqueItem(deps, runId, item.idx, budget);
-    log(`  critique idx=${item.idx} ${v.approved ? 'APPROVE' : 'VETO'} — ${v.reason}`);
-    if (v.approved) ready.push(item.idx);
-    else vetoed.push({ idx: item.idx, reason: v.reason });
-  }
+  // CRITIQUING — every non-deferred item, zero gas. Simulate, then the Critic,
+  // with at most one re-plan cycle (CVY-011).
+  const critique = await phaseCritique(deps, runId, budget);
+  const vetoed = critique.vetoed.map((v) => ({ idx: v.idx, reason: v.reason }));
+  const ready = [...critique.ready];
+  for (const note of critique.notes) log(`  critique: ${note}`);
 
-  await setRunStatus(runId, 'EXECUTING', 'PLAN_READY', { ready, vetoed: vetoed.map((v) => v.idx) });
+  await setRunStatus(runId, 'EXECUTING', 'PLAN_READY', {
+    ready,
+    vetoed: vetoed.map((v) => v.idx),
+    failed: critique.failedIdx,
+    replanCycles: critique.replanCycles,
+    notes: critique.notes,
+    criticConsulted:
+      critique.vetoed.some((v) => v.criticConsulted === true) || deps.critic !== undefined,
+  });
 
   const executed: ExecuteOutcome[] = [];
   let debited = new Prisma.Decimal(0);

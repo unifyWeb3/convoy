@@ -19,11 +19,11 @@ Hackathon: KeeperHub Agents Onchain (submit before Aug 13 2026 12:00 UTC+2).
 3. Open .convoy/tasks/<CVY-ID>.md and follow it exactly. Do not duplicate completed work.
 
 ## Commands (pnpm, Node 22, Foundry, Prisma, Next 14)
-Install: pnpm install | DB client: pnpm --filter @convoy/db db:generate
-DB migrate: pnpm --filter @convoy/db db:migrate | Build: pnpm -r build
-Unit: pnpm -r test | Contracts: (cd packages/contracts && forge test) | Fmt: forge fmt --check
-Lint: pnpm -r lint | Typecheck: pnpm -r typecheck
-Web dev: pnpm --filter @convoy/web dev | Worker: pnpm --filter @convoy/worker dev
+Build, test, lint, typecheck, format, db, dev and contract commands are root `package.json`
+scripts — read them there. Run the ROOT script (`pnpm typecheck`), not the recursive form
+(`pnpm -r typecheck`): only the root script also runs `typecheck:scripts`, and that gap is how CI
+stayed red for several milestones.
+Only the two that are not scripts:
 E2E: pnpm --filter @convoy/web exec playwright test
 Ablation: pnpm tsx scripts/ablation.ts --ablate-planner|--ablate-critic
 

@@ -733,3 +733,68 @@ Open for investigation before GATE 2, because a flaky gate trains a reader to re
 
 **262 tests · Foundry 45 · verify-env 13/0/0 · guards clean · `--frozen-lockfile` clean · root
 typecheck green for the first time in several milestones. Next: CVY-011 — the Critic.**
+
+## 2026-08-05 — CVY-011: Critic agent + simulate veto + corroboration
+
+Full report: [`docs/milestones/CVY-011.md`](milestones/CVY-011.md).
+
+### Acceptance, measured not asserted
+
+**5/5 invalid items VETOED**, each with an expected reason (≥4/5) · **5/5 valid items APPROVED · 0 FALSE VETOES** (bar is zero). Model consulted on 9/10 items; corroboration overrode 0 verdicts.
+
+The two numbers that matter: **final** (after corroboration — what the run would actually do) and **model-alone** (before the simulator and arithmetic were applied). Keeping them apart is what lets CVY-016's honesty table say what the LLM contributed rather than crediting it with the simulator's work.
+
+**Items 7 and 8 are the load-bearing rows.** Both simulate cleanly — the simulator has nothing to say about either — and without the Critic both would have executed. Item 7 funds 500.000000 USDC where the evidence names 250.000000; item 8's evidence says to hold the market. Neither reverts, neither exceeds its gas allocation, and the Critic caught both.
+
+### One false veto, found and fixed — G-34
+
+The **first** live measurement produced 5/5 invalid vetoed and **1 false veto** on item 3, `fund(75000000)` against evidence reading "an additional 75.000000 USDC". The model reported "the action funds 75,000,000 units" — a base-units confusion. USDC has 6 decimals, so `75000000` **is** 75.000000 USDC, the same amount written twice.
+
+The model had not been told the convention, so "does the amount match" was unanswerable. Fixed by adding the base-units paragraph to the fixed instruction, naming no fixture amount — it makes item 7 **sharper**, not weaker. Re-measured: **0 false vetoes**, and 5/5 invalid still caught. That is the eval doing its job: the fixture was authored before the prompt was tuned.
+
+### The corroboration override that holds
+
+**`corroborate.ts`** implements the full table and is unit-tested directly (30 tests, no model required). The worker makes the override **structural**: the simulate runs first, and an item the simulator rejects returns before the model is consulted at all — same outcome, no tokens spent asking about a call that cannot succeed.
+
+Order of authority, top to bottom — each layer can only ADD a veto:
+
+```
+whitelist  →  simulator  →  arithmetic  →  Critic
+```
+
+The simulator wins every disagreement, in both directions. A model APPROVE on a would-revert action is overridden to VETO; an uncorroborated model VETO(would_revert) or VETO(over_budget) is discarded. The model's opinion on revert and overspend is discarded both ways. 30 unit tests cover both override directions and every edge of the logic.
+
+### The card's proof — a real would-revert simulate
+
+Recorded in `tests/fixtures/critic.transcripts/veto.json`, HTTP **400** from `POST /api/execute/contract-call` with `simulate:true`:
+
+```
+idx 5  wouldRevert: true   selector 0x30f065ef  ->  MarketAlreadyEnabled()
+idx 6  wouldRevert: true   selector 0xb466ddbf  ->  RootAlreadySet()
+```
+
+Both against the deployed `MockRewardDistributor` (`0xD45c61797d7283caf8A31D91A5Bd6465A45AD561`) on Base Sepolia 84532. Neither is staged; the contract's root **is** set and market 1 **is** enabled from Convoy's own earlier runs. The fixture was written after reading that state with `cast call`.
+
+### The one permitted re-plan cycle
+
+Capped by a constant: `MAX_REPLAN_CYCLES = 1`. A test asserts the port is called exactly once even when it keeps asking for another cycle. An item still vetoed after its one re-plan becomes `FAILED`, with the closed-enum `veto_reason` retained. An item the re-plan did not ask to revisit stays `VETOED` rather than `FAILED`.
+
+### Provider reality
+
+The first two live attempts lost 7/10 and 8/10 Critic calls to upstream 429s and timeouts. Three harness changes (raised timeout to 60s unless the operator set one; pacing to 4s; transport retry to 4 attempts); transport failures are retried, a response never is. `pnpm run eval:critic:replay` reproduces the committed measurement exactly with no credential and no spend.
+
+### Two new decisions and two new gaps
+
+**DEC-033** — `over_budget` is two questions (will this item exceed its allocation; will the run exceed its total), both arithmetic, neither the model's. The projection is L2-only (~2.4% understated) and deliberately unpadded because it errs toward APPROVE. Unknown is never a veto; the boundary is `greaterThan`, not equal.
+
+**DEC-034** — an uncited veto is not a finding. Quote checked for existence only, never substring-matched.
+
+**G-33** — all four BullMQ phase handlers are still skeletons; OPEN; connect at CVY-015 where crash-resume needs them.
+
+**G-34** — the base-units false veto of item 3; MITIGATED (§4c of the report).
+
+### The fixed instruction is separately-prompted
+
+Shares no constant with the Planner; a test asserts they differ. Asymmetric by design: APPROVE is the default, and "what is already decided without you" explicitly names the whitelist, the simulate, and the arithmetic. The case only the Critic can catch is a justification gap the simulator cannot see — funding 500 where the evidence names 250; holding a market the evidence says to open.
+
+**315 tests** (db 35 · kh-client 127 · web 65 · worker 88) · Foundry 45 · verify-env 13/0/0 · guards clean · `--frozen-lockfile` clean · root typecheck green · `eval:critic` PASS — both bars · `eval:critic:replay` reproduces. Net new tests this milestone: **53**. Next: CVY-012 — Manifest exporter.

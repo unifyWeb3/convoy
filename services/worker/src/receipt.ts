@@ -73,6 +73,62 @@ async function rpcReceipt(
   return result as Record<string, unknown>;
 }
 
+/** The RPC URLs to try, in order. Both providers, alternating. */
+function rpcUrls(override?: string): string[] {
+  return (
+    override !== undefined
+      ? [override]
+      : [process.env['BASE_RPC_URL'], process.env['BASE_RPC_URL_FALLBACK']]
+  ).filter((u): u is string => u !== undefined && u !== '');
+}
+
+/**
+ * Read the current gas price, for the Critic's cost projection (CVY-011).
+ *
+ * The simulate returns gas UNITS; turning that into the USDC the plan allocated
+ * needs a price, and at CRITIQUING there is no receipt to take one from. So it
+ * comes from `eth_gasPrice` on the same RPC the receipts come from.
+ *
+ * Returns `undefined` rather than a guess when the RPC cannot be reached, and
+ * the caller's projection is then `unknown` — which is not a veto. Falling back
+ * to a hardcoded price would produce a confident number with no chain behind it,
+ * and on the wrong side of that error an item gets vetoed for arithmetic nobody
+ * can reproduce.
+ */
+export async function readGasPriceWei(
+  options: ReceiptReaderOptions = {},
+): Promise<bigint | undefined> {
+  const urls = rpcUrls(options.rpcUrl);
+  if (urls.length === 0) return undefined;
+
+  const doFetch = options.fetchImpl ?? fetch;
+  const attempts = options.attempts ?? 3;
+  const delay = options.retryDelayMs ?? 1_000;
+
+  for (let i = 0; i < attempts; i += 1) {
+    const url = urls[i % urls.length] as string;
+    try {
+      const response = await doFetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_gasPrice', params: [] }),
+        signal: AbortSignal.timeout(options.timeoutMs ?? 10_000),
+      });
+      if (response.ok) {
+        const body = (await response.json()) as { result?: unknown } | null;
+        const price = toBigInt(body?.result);
+        if (price !== undefined && price > 0n) return price;
+      }
+    } catch {
+      // Transport failure. Retried below — an RPC error response is an answer
+      // and would have come back as a non-bigint result, which also retries
+      // here because there is no useful distinction to draw at this call site.
+    }
+    if (i < attempts - 1) await new Promise((res) => setTimeout(res, delay * (i + 1)));
+  }
+  return undefined;
+}
+
 /**
  * Read one receipt via `BASE_RPC_URL`, retrying.
  *
@@ -97,11 +153,7 @@ export async function readReceiptGas(
   // variables currently point at the SAME host, so the redundancy is nominal —
   // the code is right and the configuration is what would need changing to make
   // it worth anything.
-  const urls = (
-    options.rpcUrl !== undefined
-      ? [options.rpcUrl]
-      : [process.env['BASE_RPC_URL'], process.env['BASE_RPC_URL_FALLBACK']]
-  ).filter((u): u is string => u !== undefined && u !== '');
+  const urls = rpcUrls(options.rpcUrl);
   if (urls.length === 0) return undefined;
 
   const doFetch = options.fetchImpl ?? fetch;

@@ -7,10 +7,12 @@
 //   A config-revert (full message, no code) is terminal — never retried.
 // Every transition is transactional and emits exactly one events row.
 //
-// INTERIM (D-029): there is no Planner (CVY-010) and no LLM Critic (CVY-011)
-// yet. The plan is hardcoded from the seeded item order, and the APPROVE guard
-// is satisfied by the deterministic kh-client simulate alone. The LLM Critic
-// layers ON TOP of this gate at CVY-011; it does not replace it.
+// THE APPROVE GUARD, as of CVY-011. D-029's interim note said the guard was the
+// deterministic kh-client simulate alone, and that the LLM Critic would layer ON
+// TOP of it rather than replace it. That is what happened, and the ordering
+// still reads that way: simulate first, then the arithmetic, then the Critic —
+// each one able only to ADD a veto. The model cannot approve past a revert, and
+// it cannot approve past the budget projection.
 
 import {
   Prisma,
@@ -30,17 +32,110 @@ import {
 } from '@convoy/kh-client';
 
 import { DISTRIBUTOR_ABI, REGISTRY_ABI, decodeRevertSelector } from './abis.js';
-import { canAfford, gasUsdc, planExhaustion, type BudgetState } from './budget.js';
-import { readReceiptGas } from './receipt.js';
+import {
+  canAfford,
+  gasUsdc,
+  planExhaustion,
+  projectItemCost,
+  type BudgetState,
+  type CostProjection,
+} from './budget.js';
+import { readGasPriceWei, readReceiptGas } from './receipt.js';
 
 export const MAX_ONCHAIN_RETRIES = 2;
 
+/**
+ * The cycle is capped at ONE (CVY-011). Not a tuning knob: a Critic that can
+ * ask for another plan indefinitely is a run that never seals, and an item the
+ * Planner could not fix on the second look is not going to be fixed on the
+ * ninth.
+ */
+export const MAX_REPLAN_CYCLES = 1;
+
 const REGISTRY_FNS = new Set(['openRun', 'commitAction', 'sealRun']);
+
+// ---------------------------------------------------------------------------
+// The Critic port (CVY-011)
+// ---------------------------------------------------------------------------
+//
+// THE WORKER DOES NOT IMPORT THE CRITIC, for the same reason it does not import
+// the Planner (D-030): the Critic lives in `apps/web/lib/critic` per the frozen
+// file layout, and the worker compiles with `rootDir: src`. So the worker
+// declares the SHAPE it needs and the composition root supplies it — the port
+// below is structurally identical to what `critiqueAction` returns.
+//
+// The direction of that dependency is also the honest one. A worker that
+// required an LLM to execute a run would stop when the provider did. With no
+// Critic wired, `deps.critic` is undefined and the gate is the simulator alone —
+// the documented CVY-011 fallback — reported as `criticConsulted:false` rather
+// than as an approval that nobody granted.
+
+export type CriticVetoReason =
+  'would_revert' | 'over_budget' | 'unmet_dependency' | 'evidence_mismatch';
+
+/** What the deterministic half established, before the model is consulted. */
+export interface CriticFacts {
+  readonly wouldRevert: boolean;
+  readonly revertReason?: string;
+  readonly budget: 'affordable' | 'over_budget' | 'unknown';
+  readonly budgetDetail?: string;
+  readonly targetWhitelisted: boolean;
+}
+
+/** One action put to the Critic. Symbolic target name — never an address. */
+export interface CriticAction {
+  readonly idx: number;
+  readonly target: string;
+  readonly functionName: string;
+  readonly functionArgs: readonly unknown[];
+  readonly evidence: string;
+  readonly plannerRationale?: string;
+  readonly dependsOn?: readonly { idx: number; landed: boolean }[];
+  readonly gasBudgetUsdc?: string;
+  readonly simulator: {
+    readonly wouldRevert: boolean;
+    readonly revertReason?: string;
+    readonly gasEstimate?: string;
+    readonly budget?: 'affordable' | 'over_budget' | 'unknown';
+    readonly budgetDetail?: string;
+  };
+}
+
+export interface CriticOutcome {
+  readonly approved: boolean;
+  readonly reason?: CriticVetoReason;
+  readonly decidedBy: string;
+  readonly detail: string;
+  readonly overrides: readonly string[];
+  readonly criticConsulted: boolean;
+}
+
+export type CriticPort = (action: CriticAction, facts: CriticFacts) => Promise<CriticOutcome>;
+
+/** What the worker asks for when the Critic vetoed something. */
+export interface ReplanRequest {
+  readonly runId: string;
+  readonly vetoed: readonly { idx: number; reason: string; detail: string }[];
+}
+
+export interface ReplanOutcome {
+  /** Revised per-item allocations, applied before the second critique. */
+  readonly gasBudgetPerItem?: readonly { idx: number; gasBudgetUsdc: string }[];
+  /** Which items are worth a second look. Anything absent stays vetoed. */
+  readonly retryIdx: readonly number[];
+  readonly note: string;
+}
+
+export type ReplanPort = (request: ReplanRequest) => Promise<ReplanOutcome | undefined>;
 
 export interface OrchestratorDeps {
   readonly kh: KhClient;
   readonly registryAddr: string;
   readonly log?: (m: string) => void;
+  /** The LLM Critic. Absent = simulator-only gate, the documented fallback. */
+  readonly critic?: CriticPort;
+  /** One re-plan cycle after a veto. Absent = vetoes are final on the first pass. */
+  readonly replan?: ReplanPort;
 }
 
 function hexBytes(hex: string): Buffer {
@@ -451,20 +546,46 @@ export interface CritiqueVerdict {
   readonly idx: number;
   readonly approved: boolean;
   readonly reason: string;
+  /** Which authority decided. `default` means the deterministic gate alone. */
+  readonly decidedBy?: string;
+  /** True when a model verdict was obtained and reconciled. */
+  readonly criticConsulted?: boolean;
+  /** Every point at which the model was overruled. Recorded, never dropped. */
+  readonly overrides?: readonly string[];
+  readonly vetoReason?: CriticVetoReason;
+}
+
+export interface CritiqueOptions {
+  /** Read once per run rather than per item. Absent = projection is `unknown`. */
+  readonly gasPriceWei?: bigint;
 }
 
 /**
- * Simulate one item and record the verdict. Zero gas: no signing, no broadcast.
+ * Simulate one item, then critique it. Zero gas: no signing, no broadcast, no
+ * audit row on the KeeperHub side.
  *
- * The APPROVE guard is **simulator-only** at this milestone (D-029). A
+ * ORDER IS LOAD-BEARING, and it is the order the card requires. The simulate
+ * runs FIRST, so the Critic is handed a fact rather than asked to guess one, and
+ * so `over_budget` can be arithmetic on a real gas estimate. It also means the
+ * corroboration override — "a Critic APPROVE on an action the simulator says
+ * would revert is overridden to VETO" — is structural here rather than
+ * reconciled: an item the simulator rejects returns before the model is
+ * consulted at all, which is the same outcome for no tokens. The override is
+ * still implemented and unit-tested in `apps/web/lib/critic/corroborate.ts`,
+ * where the eval exercises it with both verdicts in hand.
+ *
+ * The deterministic gate keeps its authority in full (D-029 unchanged): a
  * `wouldRevert:true` is a genuine precondition failure decoded from the
- * contract's own custom error — never a staged one.
+ * contract's own custom error, never a staged one, and the model cannot talk it
+ * away. What the Critic ADDS is the judgement neither the simulator nor the
+ * arithmetic can make — whether the call is the one the evidence asked for.
  */
 export async function critiqueItem(
   deps: OrchestratorDeps,
   runId: string,
   itemIdx: number,
   budget: BudgetState,
+  options: CritiqueOptions = {},
 ): Promise<CritiqueVerdict> {
   const item = await prisma.item.findUniqueOrThrow({
     where: { runId_idx: { runId, idx: itemIdx } },
@@ -495,17 +616,26 @@ export async function critiqueItem(
         reason: 'would_revert',
         revert: decoded ?? sim.revertReason ?? null,
         selector: sim.revertSelector ?? null,
+        decidedBy: 'simulator',
+        criticConsulted: false,
         gasSpent: 0,
       },
       data: { vetoReason: 'would_revert' },
     });
-    return { idx: itemIdx, approved: false, reason: `would_revert: ${decoded ?? 'unknown'}` };
+    return {
+      idx: itemIdx,
+      approved: false,
+      reason: `would_revert: ${decoded ?? 'unknown'}`,
+      decidedBy: 'simulator',
+      criticConsulted: false,
+      vetoReason: 'would_revert',
+    };
   }
 
-  const afford = canAfford(budget, {
-    itemIdx,
-    gasBudgetUsdc: item.gasBudgetUsdc === null ? null : new Prisma.Decimal(item.gasBudgetUsdc),
-  });
+  const allocation = item.gasBudgetUsdc === null ? null : new Prisma.Decimal(item.gasBudgetUsdc);
+
+  // Can the RUN still pay for a slice this size? (CVY-007, meter-side.)
+  const afford = canAfford(budget, { itemIdx, gasBudgetUsdc: allocation });
   if (afford.verdict === 'over_budget') {
     await transitionItem({
       runId,
@@ -513,10 +643,89 @@ export async function critiqueItem(
       expect: ['PLANNED', 'DEFERRED', 'SIMULATED'],
       to: 'VETOED',
       type: 'ITEM_VETOED',
-      payload: { reason: 'over_budget', detail: afford.reason, gasSpent: 0 },
+      payload: {
+        reason: 'over_budget',
+        detail: afford.reason,
+        decidedBy: 'arithmetic',
+        criticConsulted: false,
+        gasSpent: 0,
+      },
       data: { vetoReason: 'over_budget' },
     });
-    return { idx: itemIdx, approved: false, reason: afford.reason };
+    return {
+      idx: itemIdx,
+      approved: false,
+      reason: afford.reason,
+      decidedBy: 'arithmetic',
+      criticConsulted: false,
+      vetoReason: 'over_budget',
+    };
+  }
+
+  // Does THIS ITEM cost more than the slice the plan gave it? The card's
+  // `over_budget`: the simulate estimate against the per-item allocation.
+  const run = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
+  const projection = projectItemCost({
+    itemIdx,
+    gasEstimateUnits: sim.gasEstimate,
+    gasPriceWei: options.gasPriceWei,
+    allocationUsdc: allocation,
+    runEthUsd: new Prisma.Decimal(run.runEthUsd),
+  });
+  if (projection.verdict === 'over_budget') {
+    await transitionItem({
+      runId,
+      itemIdx,
+      expect: ['PLANNED', 'DEFERRED', 'SIMULATED'],
+      to: 'VETOED',
+      type: 'ITEM_VETOED',
+      payload: {
+        reason: 'over_budget',
+        detail: projection.detail,
+        decidedBy: 'arithmetic',
+        criticConsulted: false,
+        gasSpent: 0,
+      },
+      data: { vetoReason: 'over_budget' },
+    });
+    return {
+      idx: itemIdx,
+      approved: false,
+      reason: projection.detail,
+      decidedBy: 'arithmetic',
+      criticConsulted: false,
+      vetoReason: 'over_budget',
+    };
+  }
+
+  // The deterministic gate is satisfied. Now the judgement it cannot make.
+  const critique = await runCritic(deps, run, item, sim, projection);
+  if (!critique.approved) {
+    await transitionItem({
+      runId,
+      itemIdx,
+      expect: ['PLANNED', 'DEFERRED', 'SIMULATED'],
+      to: 'VETOED',
+      type: 'ITEM_VETOED',
+      payload: {
+        reason: critique.reason ?? 'evidence_mismatch',
+        detail: critique.detail,
+        decidedBy: critique.decidedBy,
+        criticConsulted: critique.criticConsulted,
+        overrides: [...critique.overrides],
+        gasSpent: 0,
+      },
+      data: { vetoReason: critique.reason ?? 'evidence_mismatch' },
+    });
+    return {
+      idx: itemIdx,
+      approved: false,
+      reason: `${critique.reason ?? 'evidence_mismatch'}: ${critique.detail}`,
+      decidedBy: critique.decidedBy,
+      criticConsulted: critique.criticConsulted,
+      overrides: critique.overrides,
+      ...(critique.reason === undefined ? {} : { vetoReason: critique.reason }),
+    };
   }
 
   await transitionItem({
@@ -525,9 +734,280 @@ export async function critiqueItem(
     expect: ['PLANNED', 'DEFERRED'],
     to: 'SIMULATED',
     type: 'ITEM_SIMULATED',
-    payload: { gasEstimate: sim.gasEstimate ?? null, wouldRevert: false },
+    payload: {
+      gasEstimate: sim.gasEstimate ?? null,
+      wouldRevert: false,
+      projectedUsdc: projection.projectedUsdc === null ? null : projection.projectedUsdc.toFixed(6),
+      decidedBy: critique.decidedBy,
+      criticConsulted: critique.criticConsulted,
+      overrides: [...critique.overrides],
+      detail: critique.detail,
+    },
   });
-  return { idx: itemIdx, approved: true, reason: `gasEstimate ${sim.gasEstimate ?? '?'}` };
+  return {
+    idx: itemIdx,
+    approved: true,
+    reason: `gasEstimate ${sim.gasEstimate ?? '?'} — ${critique.detail}`,
+    decidedBy: critique.decidedBy,
+    criticConsulted: critique.criticConsulted,
+    overrides: critique.overrides,
+  };
+}
+
+/**
+ * Consult the Critic, or report honestly that there was none.
+ *
+ * A THROWN CRITIC IS NOT A VETO. The port reaches a network; if it fails, the
+ * item falls back to the deterministic gate's verdict — which at this point is
+ * already an approve — rather than being rejected for an infrastructure fault.
+ * Vetoing on an exception would make a provider outage look like a batch full of
+ * bad items, which is the most expensive way to be wrong here.
+ */
+async function runCritic(
+  deps: OrchestratorDeps,
+  run: { runEthUsd: Prisma.Decimal | string; plan: unknown },
+  item: {
+    idx: number;
+    targetAddr: Uint8Array;
+    functionName: string;
+    functionArgs: unknown;
+    evidence: string;
+    gasBudgetUsdc: Prisma.Decimal | null;
+    dependsOn: number[];
+    runId: string;
+  },
+  sim: { gasEstimate?: string },
+  projection: CostProjection,
+): Promise<CriticOutcome & { readonly detail: string }> {
+  if (deps.critic === undefined) {
+    return {
+      approved: true,
+      decidedBy: 'default',
+      detail: 'simulator-only gate; no Critic was wired',
+      overrides: [],
+      criticConsulted: false,
+    };
+  }
+
+  const stored = readStoredPlan(run.plan);
+  const rationale = readRationale(run.plan, item.idx);
+  const deps_ = await prisma.item.findMany({
+    where: { runId: item.runId, idx: { in: item.dependsOn } },
+    select: { idx: true, state: true },
+  });
+
+  const action: CriticAction = {
+    idx: item.idx,
+    // Symbolic name, never an address — the Critic's vocabulary matches the
+    // Planner's (schema.ts), so an injected target is inexpressible on both
+    // sides of the LLM boundary rather than only on one.
+    target: targetName(deps, bytesToHex(item.targetAddr)),
+    functionName: item.functionName,
+    functionArgs: item.functionArgs as readonly unknown[],
+    evidence: item.evidence,
+    ...(rationale === undefined ? {} : { plannerRationale: rationale }),
+    dependsOn: deps_.map((d) => ({ idx: d.idx, landed: d.state === 'LANDED' })),
+    ...(item.gasBudgetUsdc === null
+      ? {}
+      : { gasBudgetUsdc: new Prisma.Decimal(item.gasBudgetUsdc).toFixed(6) }),
+    simulator: {
+      wouldRevert: false,
+      ...(sim.gasEstimate === undefined ? {} : { gasEstimate: sim.gasEstimate }),
+      budget: projection.verdict,
+      budgetDetail: projection.detail,
+    },
+  };
+
+  const facts: CriticFacts = {
+    wouldRevert: false,
+    budget: projection.verdict,
+    budgetDetail: projection.detail,
+    // An item whose target was not whitelisted never reaches CRITIQUING: it is
+    // vetoed at PLANNING from `plan.excludedIdx` (see phasePlan). Reaching here
+    // therefore means whitelisted, and this states that rather than re-deriving
+    // a whitelist the worker does not hold.
+    targetWhitelisted: !(stored?.excludedIdx ?? []).includes(item.idx),
+  };
+
+  try {
+    const outcome = await deps.critic(action, facts);
+    return { ...outcome, detail: outcome.detail };
+  } catch (e) {
+    return {
+      approved: true,
+      decidedBy: 'default',
+      detail: `Critic unavailable (${e instanceof Error ? e.message : String(e)}); simulator-only gate`,
+      overrides: [],
+      criticConsulted: false,
+    };
+  }
+}
+
+/** The Planner's one-line reason for this item, if a plan recorded one. */
+function readRationale(plan: unknown, idx: number): string | undefined {
+  if (plan === null || typeof plan !== 'object' || Array.isArray(plan)) return undefined;
+  const rows = (plan as Record<string, unknown>)['rationalePerItem'];
+  if (!Array.isArray(rows)) return undefined;
+  for (const r of rows) {
+    if (r !== null && typeof r === 'object' && (r as { idx?: unknown }).idx === idx) {
+      const text = (r as { rationale?: unknown }).rationale;
+      if (typeof text === 'string' && text !== '') return text;
+    }
+  }
+  return undefined;
+}
+
+/** Address → symbolic contract name. Anything unrecognised is named as such. */
+function targetName(deps: OrchestratorDeps, addr: string): string {
+  if (addr.toLowerCase() === deps.registryAddr.toLowerCase()) return 'ConvoyRegistry';
+  const distributor = process.env['MOCK_DISTRIBUTOR_ADDR'];
+  if (distributor !== undefined && addr.toLowerCase() === distributor.toLowerCase()) {
+    return 'RewardDistributor';
+  }
+  return 'UnknownContract';
+}
+
+export interface CritiquePhaseResult {
+  readonly ready: readonly number[];
+  readonly vetoed: readonly CritiqueVerdict[];
+  /** Items that stayed vetoed through the one permitted re-plan cycle. */
+  readonly failedIdx: readonly number[];
+  readonly replanCycles: number;
+  readonly notes: readonly string[];
+}
+
+/**
+ * CRITIQUING for the whole run, with AT MOST ONE re-plan cycle.
+ *
+ * The cap is the acceptance criterion and it is enforced by a constant, not by a
+ * convention: `MAX_REPLAN_CYCLES` bounds the loop whatever the Planner or the
+ * Critic asks for. An item that is still vetoed after its second look is
+ * terminal — `FAILED`, with the closed-enum veto reason kept on the row — and
+ * the run seals PARTIAL. That is a designed outcome, not a crash.
+ *
+ * Without a `replan` port there is no cycle at all and a veto is final on the
+ * first pass, which is exactly the pre-CVY-011 behaviour.
+ *
+ * The gas price is read ONCE for the whole phase. Per item it would be N RPC
+ * round trips inside the demo's tightest beat, and a price that drifts between
+ * items would make two identical actions get different budget verdicts.
+ */
+export async function phaseCritique(
+  deps: OrchestratorDeps,
+  runId: string,
+  budget: BudgetState,
+  options: CritiqueOptions = {},
+): Promise<CritiquePhaseResult> {
+  const log = deps.log ?? ((): void => {});
+  const notes: string[] = [];
+
+  const gasPriceWei = options.gasPriceWei ?? (await readGasPriceWei());
+  if (gasPriceWei === undefined) {
+    // Not a veto, and said out loud. The projection degrades to `unknown` and
+    // `over_budget` simply cannot fire this run; silently skipping the check
+    // would leave nothing in the record to explain why.
+    notes.push('gas price unavailable — the per-item budget projection is unknown for this run');
+    log('  critique: no gas price; per-item budget projection disabled');
+  }
+  const itemOptions: CritiqueOptions = gasPriceWei === undefined ? {} : { gasPriceWei };
+
+  const critiqueSet = async (indices: readonly number[]): Promise<CritiqueVerdict[]> => {
+    const out: CritiqueVerdict[] = [];
+    for (const idx of indices) {
+      const v = await critiqueItem(deps, runId, idx, budget, itemOptions);
+      log(
+        `  critique idx=${idx} ${v.approved ? 'APPROVE' : 'VETO'} ` +
+          `[${v.decidedBy ?? 'default'}${v.criticConsulted === true ? '' : ', no critic'}] — ${v.reason}`,
+      );
+      for (const o of v.overrides ?? []) log(`    override: ${o}`);
+      out.push(v);
+    }
+    return out;
+  };
+
+  const planned = await prisma.item.findMany({
+    where: { runId, state: 'PLANNED' },
+    orderBy: { idx: 'asc' },
+    select: { idx: true },
+  });
+  const first = await critiqueSet(planned.map((p) => p.idx));
+
+  const ready = first.filter((v) => v.approved).map((v) => v.idx);
+  let vetoed = first.filter((v) => !v.approved);
+  const failedIdx: number[] = [];
+  let cycles = 0;
+
+  if (vetoed.length > 0 && deps.replan !== undefined) {
+    const outcome = await deps.replan({
+      runId,
+      vetoed: vetoed.map((v) => ({
+        idx: v.idx,
+        reason: v.vetoReason ?? 'evidence_mismatch',
+        detail: v.reason,
+      })),
+    });
+
+    if (outcome === undefined) {
+      notes.push('re-plan declined; the first-pass vetoes stand');
+    } else {
+      cycles = MAX_REPLAN_CYCLES;
+      notes.push(`re-plan cycle 1/${MAX_REPLAN_CYCLES}: ${outcome.note}`);
+
+      for (const g of outcome.gasBudgetPerItem ?? []) {
+        await prisma.item.update({
+          where: { runId_idx: { runId, idx: g.idx } },
+          data: { gasBudgetUsdc: new Prisma.Decimal(g.gasBudgetUsdc) },
+        });
+      }
+
+      // Only items the re-plan actually asked to revisit. A vetoed item the
+      // Planner did not touch has not been re-planned, so calling it
+      // "persistently vetoed" would overstate what was tried.
+      const vetoedIdx = new Set(vetoed.map((v) => v.idx));
+      const retry = outcome.retryIdx.filter((i) => vetoedIdx.has(i));
+      const reopened: number[] = [];
+      for (const idx of retry) {
+        const moved = await transitionItem({
+          runId,
+          itemIdx: idx,
+          expect: ['VETOED'],
+          to: 'PLANNED',
+          type: 'PLAN_READY',
+          payload: { idx, replanCycle: 1, note: outcome.note },
+          data: { vetoReason: null },
+        });
+        if (moved) reopened.push(idx);
+      }
+
+      const second = await critiqueSet(reopened);
+      const stillVetoed = second.filter((v) => !v.approved);
+      ready.push(...second.filter((v) => v.approved).map((v) => v.idx));
+
+      for (const v of stillVetoed) {
+        await transitionItem({
+          runId,
+          itemIdx: v.idx,
+          expect: ['VETOED'],
+          to: 'FAILED',
+          type: 'ITEM_FAILED',
+          payload: {
+            reason: v.vetoReason ?? 'evidence_mismatch',
+            detail: v.reason,
+            replanCycles: MAX_REPLAN_CYCLES,
+            note: 'persistently vetoed after the one permitted re-plan cycle',
+            gasSpent: 0,
+          },
+        });
+        failedIdx.push(v.idx);
+      }
+
+      const reopenedSet = new Set(reopened);
+      vetoed = [...vetoed.filter((v) => !reopenedSet.has(v.idx)), ...stillVetoed];
+    }
+  }
+
+  ready.sort((a, b) => a - b);
+  return { ready, vetoed, failedIdx, replanCycles: cycles, notes };
 }
 
 function isTransient(e: unknown): boolean {
@@ -802,12 +1282,20 @@ export async function releaseDeferred(
 ): Promise<number[]> {
   const items = await prisma.item.findMany({ where: { runId }, orderBy: { idx: 'asc' } });
   const landed = new Set(items.filter((i) => i.state === 'LANDED').map((i) => i.idx));
-  const released: number[] = [];
+  const ready = items.filter(
+    (i) => i.state === 'DEFERRED' && i.dependsOn.every((d) => landed.has(d)),
+  );
+  if (ready.length === 0) return [];
 
-  for (const item of items) {
-    if (item.state !== 'DEFERRED') continue;
-    if (!item.dependsOn.every((d) => landed.has(d))) continue;
-    const v = await critiqueItem(deps, runId, item.idx, budget);
+  // A released item gets the SAME critique a first-wave item got — including the
+  // Critic and the budget projection. Anything less would make the deferral gate
+  // a way to bypass the gate that matters.
+  const gasPriceWei = await readGasPriceWei();
+  const options: CritiqueOptions = gasPriceWei === undefined ? {} : { gasPriceWei };
+
+  const released: number[] = [];
+  for (const item of ready) {
+    const v = await critiqueItem(deps, runId, item.idx, budget, options);
     if (v.approved) released.push(item.idx);
   }
   return released;

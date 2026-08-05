@@ -620,3 +620,52 @@ One completion failed at the transport layer and is excluded from both denominat
 own line as `unreachable`. A dropped connection is not a model that cannot produce JSON, and counting
 it as one would be wrong in the flattering direction for the _next_ run and the unflattering
 direction for this one — so it is neither counted nor hidden.
+
+---
+
+**D-033 2026-08-05: `over_budget` is TWO deterministic questions, not one, and both may veto.**
+
+The CVY-011 card says `over_budget` comes from "comparing the simulate `gasEstimate` against the
+plan's per-item allocation". CVY-007 had already shipped `canAfford`, which compares that same
+allocation against what is left in the meter. The units did not line up — gas estimate in UNITS,
+allocation in USDC — and reconciling them wrong is exactly how a valid item gets vetoed for the
+wrong number.
+
+They are different questions and both are now asked:
+
+| Function           | Question                                                | Compares                            |
+| ------------------ | ------------------------------------------------------- | ----------------------------------- |
+| `canAfford`        | Can the RUN still pay for a slice this size?             | allocation vs meter remaining       |
+| `projectItemCost`  | Does THIS ITEM cost more than the slice the plan gave it? | gasEstimate × gasPrice → USDC vs allocation |
+
+Neither outranks the other; either firing is a real veto, because either means the run cannot honour
+the plan as written. Both are arithmetic and **neither is the model's to decide** — a model
+`VETO(over_budget)` that the projection does not corroborate is discarded, exactly as an
+uncorroborated `VETO(would_revert)` is.
+
+**The projection is L2-only and therefore understates by roughly 2.4%.** At simulate time there is no
+receipt, so there is no `l1Fee` to add (gap G-28). That error is left in rather than padded out,
+because it errs toward APPROVE and the acceptance bar that matters is **zero false vetoes**. Padding
+would trade a hard bar for a soft one.
+
+`unknown` — no allocation, or no gas price — is never a veto. The gas price is read once per phase
+from `eth_gasPrice`; when the RPC cannot be reached the projection is reported as unavailable rather
+than guessed, because an item vetoed on arithmetic nobody can reproduce is worse than an item not
+checked.
+
+---
+
+**D-034 2026-08-05: a veto that cites nothing is not a finding, and is discarded.**
+
+The Critic's instruction requires a VETO to quote the evidence line the action contradicts. That
+requirement is enforced in `corroborate`, not merely requested in the prompt: a veto arriving with an
+empty `evidenceQuote` is discarded and the discard is recorded in `overrides`.
+
+This cuts one way, deliberately. The hard acceptance bar is 5/5 valid items passed, a false veto
+costs a real epoch and a human re-run, and "this looks wrong" is not evidence. The quote is checked
+for **existence only** — never matched as a substring against the evidence — because a model that
+paraphrases a real contradiction has still found one, and substring matching would discard a true
+finding for style.
+
+The same rule discards a `VETO` carrying the `none` sentinel: there is no closed-enum value to record
+against the item, and inventing one would be worse than dropping it.

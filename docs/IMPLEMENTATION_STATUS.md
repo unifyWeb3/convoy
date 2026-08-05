@@ -1,6 +1,6 @@
-# Convoy Implementation Status (updated 2026-08-04)
+# Convoy Implementation Status (updated 2026-08-05)
 
-Overall: **54% (CVY-000…CVY-008, CVY-010 done; GATE 1 PASSED; DEC-001…DEC-010 applied)** Next milestone: **CVY-011 — Critic**
+Overall: **58% (CVY-000…CVY-008, CVY-010, CVY-011 done; GATE 1 PASSED; DEC-001…DEC-010 applied)** Next milestone: **CVY-012 — Manifest exporter**
 
 **The submission requirement is provisionally met.** Both contracts are deployed and
 Basescan-verified on Base Sepolia, and `openRun` landed through the org Turnkey wallet:
@@ -25,7 +25,7 @@ target at CVY-019, not the development target.
 | CVY-GATE1 | **GATE 1** — thin slice, real tx landed via Convoy          | **PASSED**  | 100 | Called by the operator 2026-08-04                                         |
 | CVY-009   | SSE timeline UI + audit drawer + replay                     | TODO        | 0   | Never cut                                                                 |
 | CVY-010   | Planner + zod schema + repair + eval                        | DONE        | 100 | Measured: JSON 29/29, recall 0.946, 0 cycles. D-030/031/032               |
-| CVY-011   | Critic + simulate veto + corroboration                      | TODO        | 0   | Zero false vetoes; never cut                                              |
+| CVY-011   | Critic + simulate veto + corroboration                      | DONE        | 100 | 5/5 invalid vetoed, 5/5 valid approved, 0 false vetoes; G-34 mitigated   |
 | CVY-012   | Manifest exporter: 3-way reconcile + sha256                 | TODO        | 0   |                                                                           |
 | CVY-GATE2 | **GATE 2** — full 12-item run, manifest, DAG                | NOT REACHED | 0   | Fail → freeze P1, cut #2 and #5                                           |
 | CVY-013   | DAG view + deferral + onchain check-and-execute gate        | TODO        | 0   | P1                                                                        |

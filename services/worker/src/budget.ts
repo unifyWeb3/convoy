@@ -160,6 +160,87 @@ export function canAfford(state: BudgetState, allocation: Allocation): AffordVer
   };
 }
 
+// ---------------------------------------------------------------------------
+// The Critic's deterministic half (CVY-011)
+// ---------------------------------------------------------------------------
+
+/**
+ * Project what an item will cost, from the simulate estimate.
+ *
+ * TWO DIFFERENT `over_budget` QUESTIONS EXIST, and conflating them is how a
+ * valid item gets vetoed for the wrong number:
+ *
+ *   `canAfford`      — can the RUN still pay for this item at all? Allocation
+ *                      against what is left in the meter. USDC vs USDC.
+ *   `projectItemCost` — does this item cost more than the slice the PLAN gave
+ *                      it? The simulate's gas estimate against that slice. This
+ *                      is the one CVY-011 names: "compare the simulate
+ *                      gasEstimate against the plan's per-item allocation".
+ *
+ * Both are arithmetic and neither is the model's to decide. They can disagree —
+ * a cheap item with a huge allocation on an empty meter fails the first and
+ * passes the second — and they are meant to: either one firing is a real veto,
+ * because either one means the run cannot honour the plan as written.
+ *
+ * THE PROJECTION IS L2-ONLY. At simulate time there is no receipt, so there is
+ * no `l1Fee` to add — the estimate covers execution gas alone and the real cost
+ * runs about 2.9% higher (gap G-28, measured on the CVY-003 transaction). That
+ * error is left in rather than padded out, because it errs toward APPROVE, and
+ * the acceptance bar that matters is zero false vetoes. A padded projection
+ * would trade a hard bar for a soft one.
+ *
+ * `unknown` is returned wherever a figure is missing, and unknown is NEVER a
+ * veto — same rule as `canAfford`'s null allocation, for the same reason.
+ */
+export type ProjectionVerdict = 'affordable' | 'over_budget' | 'unknown';
+
+export interface CostProjection {
+  readonly verdict: ProjectionVerdict;
+  /** L2 execution cost in USDC at the run's frozen rate. Null when unknown. */
+  readonly projectedUsdc: Prisma.Decimal | null;
+  readonly detail: string;
+}
+
+export function projectItemCost(input: {
+  readonly itemIdx: number;
+  /** Gas UNITS from `simulate:true`. Never wei — see the header of this file. */
+  readonly gasEstimateUnits?: string | undefined;
+  readonly gasPriceWei?: Prisma.Decimal | string | bigint | undefined;
+  readonly allocationUsdc: Prisma.Decimal | null;
+  readonly runEthUsd: Prisma.Decimal | string;
+}): CostProjection {
+  if (input.allocationUsdc === null) {
+    return {
+      verdict: 'unknown',
+      projectedUsdc: null,
+      detail: `item ${input.itemIdx} has no per-item allocation; nothing to compare against`,
+    };
+  }
+  if (input.gasEstimateUnits === undefined || input.gasPriceWei === undefined) {
+    return {
+      verdict: 'unknown',
+      projectedUsdc: null,
+      detail:
+        `item ${input.itemIdx}: ` +
+        (input.gasEstimateUnits === undefined
+          ? 'the simulate returned no gas estimate'
+          : 'no gas price was available'),
+    };
+  }
+
+  const weiL2 = dec(input.gasEstimateUnits).mul(dec(input.gasPriceWei));
+  const projectedUsdc = gasUsdc(weiL2, input.runEthUsd);
+  const over = projectedUsdc.greaterThan(input.allocationUsdc);
+  return {
+    verdict: over ? 'over_budget' : 'affordable',
+    projectedUsdc,
+    detail:
+      `item ${input.itemIdx}: ${input.gasEstimateUnits} gas projects to ` +
+      `${projectedUsdc.toFixed(6)} USDC (L2 only) against a ` +
+      `${input.allocationUsdc.toFixed(6)} USDC allocation`,
+  };
+}
+
 /**
  * The two figures for one landed attempt. **Never conflated** (DEC-010).
  *

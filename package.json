@@ -27,7 +27,9 @@
     "worker:dev": "pnpm --filter @convoy/worker dev",
     "ablation": "tsx scripts/ablation.ts",
     "eval:planner": "tsx tests/planner.validJson.eval.ts 3 && tsx tests/planner.recall.eval.ts 3",
-    "eval:planner:replay": "CONVOY_EVAL_REPLAY=tests/fixtures/planner.transcripts/validJson.json CONVOY_EVAL_PACE_MS=0 pnpm run eval:planner"
+    "eval:planner:replay": "CONVOY_EVAL_REPLAY=tests/fixtures/planner.transcripts/validJson.json CONVOY_EVAL_PACE_MS=0 pnpm run eval:planner",
+    "eval:critic": "tsx tests/critic.veto.eval.ts",
+    "eval:critic:replay": "CONVOY_EVAL_REPLAY=tests/fixtures/critic.transcripts/veto.json pnpm run eval:critic"
   },
   "dependencies": {
     "@convoy/db": "workspace:*",
