@@ -633,10 +633,10 @@ wrong number.
 
 They are different questions and both are now asked:
 
-| Function           | Question                                                | Compares                            |
-| ------------------ | ------------------------------------------------------- | ----------------------------------- |
-| `canAfford`        | Can the RUN still pay for a slice this size?             | allocation vs meter remaining       |
-| `projectItemCost`  | Does THIS ITEM cost more than the slice the plan gave it? | gasEstimate × gasPrice → USDC vs allocation |
+| Function          | Question                                                  | Compares                                    |
+| ----------------- | --------------------------------------------------------- | ------------------------------------------- |
+| `canAfford`       | Can the RUN still pay for a slice this size?              | allocation vs meter remaining               |
+| `projectItemCost` | Does THIS ITEM cost more than the slice the plan gave it? | gasEstimate × gasPrice → USDC vs allocation |
 
 Neither outranks the other; either firing is a real veto, because either means the run cannot honour
 the plan as written. Both are arithmetic and **neither is the model's to decide** — a model
@@ -669,3 +669,23 @@ finding for style.
 
 The same rule discards a `VETO` carrying the `none` sentinel: there is no closed-enum value to record
 against the item, and inventing one would be worse than dropping it.
+
+---
+
+**D-035 2026-08-05: a manifest is an immutable terminal-run snapshot; its sha256 excludes only its
+own stamp and is computed over canonical JSON.**
+
+Export is available only after a run reaches `SEALED_OK`, `SEALED_PARTIAL`, `ABORTED`, or
+`FAILED_FATAL`. The first export reads the three live sources, stores the stamped JSON and 32-byte
+digest in `manifests`, and every later export serves that row. This is what makes the demo resilient
+to an RPC outage without silently changing history between downloads.
+
+The digest is `sha256(canonicalJson(payload))`, where object keys are recursively sorted and arrays
+retain their recorded order. The `sha256` field itself is then appended. Cached reads recompute the
+digest and compare it both with the JSON stamp and the `manifests.sha256` byte column; a corrupted
+row is rejected rather than served.
+
+Registry log reads are bounded by the ledger's real `RUN_OPENED` and `RUN_SEALED` transaction
+blocks. Scanning Base Sepolia from genesis is not a reliability strategy — ordinary dedicated RPCs
+cap log ranges. The ledger supplies only the range anchor; the emitting contract, operator,
+payloadHash, sequence, transaction hash and current registry storage all still come from chain.

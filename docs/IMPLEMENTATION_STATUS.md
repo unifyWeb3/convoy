@@ -1,6 +1,6 @@
-# Convoy Implementation Status (updated 2026-08-05)
+# Convoy Implementation Status (updated 2026-08-06)
 
-Overall: **58% (CVY-000…CVY-008, CVY-010, CVY-011 done; GATE 1 PASSED; DEC-001…DEC-010 applied)** Next milestone: **CVY-012 — Manifest exporter**
+Overall: **68% (CVY-000…CVY-012 done; GATE 1 PASSED; DEC-001…DEC-010 applied)** Next milestone: **CVY-013 — DAG view + deferral + onchain gate**
 
 **The submission requirement is provisionally met.** Both contracts are deployed and
 Basescan-verified on Base Sepolia, and `openRun` landed through the org Turnkey wallet:
@@ -23,11 +23,11 @@ target at CVY-019, not the development target.
 | CVY-007   | Budget meter + gas→USDC accounting                          | DONE        | 100 | Pinned formula; BUDGET_LOW at 20%; payer split added at DEC-010           |
 | CVY-008   | Orchestrator + RUN/ITEM state machine                       | DONE        | 100 | 3-item batch RECEIVED→SEALED_OK on 84532; DEC-006/007 measured; gap G-29  |
 | CVY-GATE1 | **GATE 1** — thin slice, real tx landed via Convoy          | **PASSED**  | 100 | Called by the operator 2026-08-04                                         |
-| CVY-009   | SSE timeline UI + audit drawer + replay                     | TODO        | 0   | Never cut                                                                 |
+| CVY-009   | SSE timeline UI + audit drawer + replay                     | DONE        | 100 | 72 web tests; browser E2E pending Chromium runtime download               |
 | CVY-010   | Planner + zod schema + repair + eval                        | DONE        | 100 | Measured: JSON 29/29, recall 0.946, 0 cycles. D-030/031/032               |
-| CVY-011   | Critic + simulate veto + corroboration                      | DONE        | 100 | 5/5 invalid vetoed, 5/5 valid approved, 0 false vetoes; G-34 mitigated   |
-| CVY-012   | Manifest exporter: 3-way reconcile + sha256                 | TODO        | 0   |                                                                           |
-| CVY-GATE2 | **GATE 2** — full 12-item run, manifest, DAG                | NOT REACHED | 0   | Fail → freeze P1, cut #2 and #5                                           |
+| CVY-011   | Critic + simulate veto + corroboration                      | DONE        | 100 | 5/5 invalid vetoed, 5/5 valid approved, 0 false vetoes; G-34 mitigated    |
+| CVY-012   | Manifest exporter: 3-way reconcile + sha256                 | DONE        | 100 | 3-source rows; stable hash; cached JSON; copy/download; G-24 mitigated    |
+| CVY-GATE2 | **GATE 2** — full 12-item run, manifest, DAG                | NOT REACHED | 0   | Blocked by CVY-013; fail → freeze P1, cut #2 and #5                       |
 | CVY-013   | DAG view + deferral + onchain check-and-execute gate        | TODO        | 0   | P1                                                                        |
 | CVY-014   | Human approval gate                                         | TODO        | 0   | P1                                                                        |
 | CVY-015   | Idempotency + crash-resume + kill-worker test               | TODO        | 0   | Never cut                                                                 |
@@ -40,7 +40,7 @@ target at CVY-019, not the development target.
 
 ## Critical path
 
-`002 → 004 → 003 → 008 → GATE1 → 012 → GATE2 → 015 → 019`
+`002 → 004 → 003 → 008 → GATE1 → 012 → 009 → 013 → GATE2 → 015 → 019`
 
 The first real Base transaction (CVY-003) is front-loaded so the hackathon submission requirement is
 provisionally met before any feature work — but it cannot precede CVY-004, because the transaction is

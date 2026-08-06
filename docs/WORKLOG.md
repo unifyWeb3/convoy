@@ -798,3 +798,48 @@ The first two live attempts lost 7/10 and 8/10 Critic calls to upstream 429s and
 Shares no constant with the Planner; a test asserts they differ. Asymmetric by design: APPROVE is the default, and "what is already decided without you" explicitly names the whitelist, the simulate, and the arithmetic. The case only the Critic can catch is a justification gap the simulator cannot see — funding 500 where the evidence names 250; holding a market the evidence says to open.
 
 **315 tests** (db 35 · kh-client 127 · web 65 · worker 88) · Foundry 45 · verify-env 13/0/0 · guards clean · `--frozen-lockfile` clean · root typecheck green · `eval:critic` PASS — both bars · `eval:critic:replay` reproduces. Net new tests this milestone: **53**. Next: CVY-012 — Manifest exporter.
+
+## 2026-08-05 — CVY-012: Manifest exporter
+
+Full report: [`docs/milestones/CVY-012.md`](milestones/CVY-012.md).
+
+The exporter now produces one row per item with explicit KeeperHub, ConvoyRegistry and ledger
+columns. Green means every claim that should exist agrees; amber names the exact disagreement. A
+legitimate veto is green when all three sources agree that no spend or registry commitment occurred.
+
+The onchain leg is viem-only over `BASE_RPC_URL`, hard-pinned to chain 84532. It reads logs emitted
+by `CONVOY_REGISTRY_ADDR` and current registry storage, so G-24's relay `to`/`from` addresses never
+enter the comparison. Log ranges are bounded by the real run open/seal transaction blocks.
+
+The JSON contains replay inputs, evidence, plan, dependencies, attempts, append-only events, budget
+figures and frozen `runEthUsd`. Its sha256 is canonical and excludes only its own stamp. The first
+terminal-run export is stored in `manifests`; cached reads re-verify both the JSON stamp and the bytea
+digest. The run page exposes Copy JSON and Download JSON.
+
+Acceptance covered offline: stable re-export hash, honest veto green, transaction mismatch amber,
+cache-disabled download headers, 69/69 web tests, strict typecheck, lint and production build. The
+live all-green export could not run in this shell because `DATABASE_URL`, `KEEPERHUB_API_KEY`,
+`BASE_RPC_URL` and `CONVOY_REGISTRY_ADDR` were absent from the process environment; no `.env` file
+exists in the workspace. That is reported rather than replaced with a mock claim.
+
+Three review findings were recorded. **G-24 is MITIGATED. G-35 is OPEN:** a failed `commitAction`
+does not currently stop the item write. **G-36 is OPEN:** no verified Keeper Runs audit-trail REST
+surface exists, so only the direct status endpoint is claimed. **G-37 is MITIGATED:** the status
+order now respects the gate's declared dependencies. Next: CVY-009, then CVY-013, then GATE 2.
+
+## 2026-08-06 — CVY-009: SSE timeline + replay
+
+Full report: [`docs/milestones/CVY-009.md`](milestones/CVY-009.md).
+
+The run page now streams the append-only event log over SSE. `events.id` is the SSE id; the route
+replays `id > Last-Event-ID` before tailing new rows and closes with a terminal event when the run
+seals or aborts. The browser timeline derives item state, retry attempts, gas chips, veto/failed
+details, and opens an audit drawer with Planner rationale, Critic/simulate evidence, attempts,
+transaction links, and the ConvoyRegistry commit.
+
+The existing manifest exporter remains available as the second run tab. `apps/web/test` covers the
+route replay contract and server rendering. **318 tests** (db 35 · kh-client 127 · web 72 · worker
+88) · Foundry 45 · web typecheck/lint/build green. Playwright discovered the refresh spec and the
+local server/database were available, but Chromium could not launch; its CDN installation reset and
+then stalled. No browser pass is claimed. Next: CVY-013 — DAG view + deferral + onchain
+check-and-execute gate.
