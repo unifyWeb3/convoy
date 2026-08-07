@@ -1,6 +1,6 @@
-# Convoy Implementation Status (updated 2026-08-06)
+# Convoy Implementation Status (updated 2026-08-07)
 
-Overall: **68% (CVY-000…CVY-012 done; GATE 1 PASSED; DEC-001…DEC-010 applied)** Next milestone: **CVY-013 — DAG view + deferral + onchain gate**
+Overall: **74% (CVY-000…CVY-013 done; GATE 1 PASSED; DEC-001…DEC-010 applied)** Next milestone: **CVY-GATE2 — full 12-item run**
 
 **The submission requirement is provisionally met.** Both contracts are deployed and
 Basescan-verified on Base Sepolia, and `openRun` landed through the org Turnkey wallet:
@@ -27,8 +27,8 @@ target at CVY-019, not the development target.
 | CVY-010   | Planner + zod schema + repair + eval                        | DONE        | 100 | Measured: JSON 29/29, recall 0.946, 0 cycles. D-030/031/032               |
 | CVY-011   | Critic + simulate veto + corroboration                      | DONE        | 100 | 5/5 invalid vetoed, 5/5 valid approved, 0 false vetoes; G-34 mitigated    |
 | CVY-012   | Manifest exporter: 3-way reconcile + sha256                 | DONE        | 100 | 3-source rows; stable hash; cached JSON; copy/download; G-24 mitigated    |
-| CVY-GATE2 | **GATE 2** — full 12-item run, manifest, DAG                | NOT REACHED | 0   | Blocked by CVY-013; fail → freeze P1, cut #2 and #5                       |
-| CVY-013   | DAG view + deferral + onchain check-and-execute gate        | TODO        | 0   | P1                                                                        |
+| CVY-GATE2 | **GATE 2** — full 12-item run, manifest, DAG                | NOT REACHED | 0   | Ready after CVY-013; not run in this milestone session                    |
+| CVY-013   | DAG view + deferral + onchain check-and-execute gate        | DONE        | 100 | Live DAG + browser E2E; atomic registry gate; G-35 mitigated              |
 | CVY-014   | Human approval gate                                         | TODO        | 0   | P1                                                                        |
 | CVY-015   | Idempotency + crash-resume + kill-worker test               | TODO        | 0   | Never cut                                                                 |
 | CVY-016   | Ablation harness + README honesty table                     | TODO        | 0   |                                                                           |

@@ -23,6 +23,16 @@ export const REGISTRY_ABI = [
     outputs: [],
   },
   {
+    name: 'isCommitted',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'runId', type: 'bytes32' },
+      { name: 'idx', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
     name: 'sealRun',
     type: 'function',
     stateMutability: 'nonpayable',

@@ -32,7 +32,11 @@ export { decodeReportedGas, extractSponsored } from './reportedGas.js';
 export type { ReportedGas } from './reportedGas.js';
 
 export { CHECK_AND_EXECUTE_PATH, checkAndExecute } from './checkAndExecute.js';
-export type { CheckAndExecuteParams } from './checkAndExecute.js';
+export type {
+  CheckAndExecuteCondition,
+  CheckAndExecuteParams,
+  CheckAndExecuteResult,
+} from './checkAndExecute.js';
 
 export {
   POLL_HINT_HEADER,

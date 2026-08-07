@@ -29,6 +29,8 @@ import {
   pollUntilTerminal,
   simulateContractCall,
   writeContractCall,
+  type CheckAndExecuteCondition,
+  type WriteResult,
 } from '@convoy/kh-client';
 
 import { DISTRIBUTOR_ABI, REGISTRY_ABI, decodeRevertSelector } from './abis.js';
@@ -41,6 +43,7 @@ import {
   type CostProjection,
 } from './budget.js';
 import { readGasPriceWei, readReceiptGas } from './receipt.js';
+import { executeWithDependencyGate, selectOnchainDependency } from './gates/checkAndExecute.js';
 
 export const MAX_ONCHAIN_RETRIES = 2;
 
@@ -1111,6 +1114,28 @@ export async function executeItem(
     txLink: commitFinal.transactionLink ?? null,
     khStatus: commitFinal.status,
   });
+  if (commitFinal.status !== 'completed' || commitFinal.transactionHash === undefined) {
+    await transitionItem({
+      runId,
+      itemIdx,
+      expect: ['SIMULATED'],
+      to: 'FAILED',
+      type: 'ITEM_FAILED',
+      payload: {
+        reason: 'commitAction did not land; target write blocked',
+        status: commitFinal.status,
+        txHash: commitFinal.transactionHash ?? null,
+      },
+    });
+    return {
+      idx: itemIdx,
+      landed: false,
+      feeFromReceipt: false,
+      l1FeeIncluded: false,
+      sponsored: null,
+      retries: 0,
+    };
+  }
   await transitionItem({
     runId,
     itemIdx,
@@ -1121,25 +1146,83 @@ export async function executeItem(
   });
 
   let retries = 0;
+  const dependencyIdx = selectOnchainDependency(item.dependsOn);
+  const action = {
+    contractAddress: bytesToHex(item.targetAddr),
+    functionName: item.functionName,
+    functionArgs: item.functionArgs as readonly unknown[],
+    abi: abiFor(item.functionName),
+  };
   for (;;) {
     try {
-      const write = await writeContractCall(
-        deps.kh,
-        {
-          contractAddress: bytesToHex(item.targetAddr),
-          functionName: item.functionName,
-          functionArgs: item.functionArgs as readonly unknown[],
-          abi: abiFor(item.functionName),
-        },
-        { runId: keyRun(runId, 'x'), idx: itemIdx, attempt: retries },
-      );
+      let write: WriteResult;
+      let condition: CheckAndExecuteCondition | undefined;
+      if (dependencyIdx === undefined) {
+        write = await writeContractCall(deps.kh, action, {
+          runId: keyRun(runId, 'x'),
+          idx: itemIdx,
+          attempt: retries,
+        });
+      } else {
+        const gated = await executeWithDependencyGate({
+          kh: deps.kh,
+          registryAddr: deps.registryAddr,
+          runIdOnchain,
+          dependencyIdx,
+          action,
+          ref: { runId: keyRun(runId, 'x'), idx: itemIdx, attempt: retries },
+        });
+        condition = gated.condition;
+        if (!gated.executed || gated.executionId === undefined) {
+          await recordAttempt(item.id, retries, 'EXECUTE', {
+            executionId: null,
+            txHash: null,
+            txLink: null,
+            khStatus: gated.condition.met ? 'condition-met-action-not-executed' : 'condition-unmet',
+            revertReason: JSON.stringify(gated.condition),
+          });
+          await transitionItem({
+            runId,
+            itemIdx,
+            expect: ['COMMITTED', 'RETRYING'],
+            to: 'FAILED',
+            type: 'ITEM_FAILED',
+            payload: {
+              reason: gated.condition.met
+                ? 'KeeperHub condition passed but the action was not executed'
+                : 'onchain dependency condition unmet',
+              dependencyIdx,
+              condition: { ...gated.condition },
+            },
+          });
+          return {
+            idx: itemIdx,
+            landed: false,
+            feeFromReceipt: false,
+            l1FeeIncluded: false,
+            sponsored: null,
+            retries,
+          };
+        }
+        write = {
+          ...gated,
+          executionId: gated.executionId,
+          status: gated.status ?? 'pending',
+        };
+      }
       await transitionItem({
         runId,
         itemIdx,
         expect: ['COMMITTED', 'RETRYING'],
         to: 'SUBMITTED',
         type: 'ITEM_SUBMITTED',
-        payload: { executionId: write.executionId, attempt: retries },
+        payload: {
+          executionId: write.executionId,
+          attempt: retries,
+          ...(dependencyIdx === undefined || condition === undefined
+            ? {}
+            : { dependencyIdx, condition: { ...condition } }),
+        },
       });
 
       // GUARD (G-23): the terminal POST does NOT carry the hash. LANDED requires
@@ -1272,8 +1355,9 @@ export async function executeItem(
 /**
  * App-side deferral gate: dependencies reached LANDED, so re-evaluate.
  *
- * Cut order #3 turns the onchain `check-and-execute` gate into this app-side
- * gate reading the registry; the deferral logic itself is unchanged.
+ * This all-dependencies ledger check remains authoritative. CVY-013 adds one
+ * atomic registry condition before the released target write; it does not
+ * replace this release rule.
  */
 export async function releaseDeferred(
   deps: OrchestratorDeps,
@@ -1281,10 +1365,8 @@ export async function releaseDeferred(
   budget: BudgetState,
 ): Promise<number[]> {
   const items = await prisma.item.findMany({ where: { runId }, orderBy: { idx: 'asc' } });
-  const landed = new Set(items.filter((i) => i.state === 'LANDED').map((i) => i.idx));
-  const ready = items.filter(
-    (i) => i.state === 'DEFERRED' && i.dependsOn.every((d) => landed.has(d)),
-  );
+  const readyIdx = new Set(deferredItemsReadyForRelease(items));
+  const ready = items.filter((item) => readyIdx.has(item.idx));
   if (ready.length === 0) return [];
 
   // A released item gets the SAME critique a first-wave item got — including the
@@ -1299,6 +1381,19 @@ export async function releaseDeferred(
     if (v.approved) released.push(item.idx);
   }
   return released;
+}
+
+export function deferredItemsReadyForRelease(
+  items: readonly {
+    readonly idx: number;
+    readonly state: string;
+    readonly dependsOn: readonly number[];
+  }[],
+): number[] {
+  const landed = new Set(items.filter((i) => i.state === 'LANDED').map((i) => i.idx));
+  return items
+    .filter((i) => i.state === 'DEFERRED' && i.dependsOn.every((d) => landed.has(d)))
+    .map((item) => item.idx);
 }
 
 /** SEALING → SEALED_OK | SEALED_PARTIAL. */

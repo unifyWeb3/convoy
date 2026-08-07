@@ -53,15 +53,49 @@ function eventDetail(event: TimelineEvent): string | null {
   return null;
 }
 
-export interface TimelineProps {
-  readonly runId: string;
-  readonly initial: TimelineSnapshot;
-}
-
 export interface TimelineLiveState {
   readonly events: readonly TimelineEvent[];
   readonly items: readonly TimelineItem[];
   readonly runStatus: string;
+}
+
+export function useTimelineLive(
+  runId: string,
+  initial: TimelineSnapshot,
+  enabled = true,
+): TimelineLiveState {
+  const [live, setLive] = useState<TimelineLiveState>({
+    events: initial.events,
+    items: initial.items,
+    runStatus: initial.run.status,
+  });
+
+  useEffect(() => {
+    if (!enabled) return;
+    const source = new EventSource(`/api/runs/${encodeURIComponent(runId)}/stream`);
+    const handleMessage = (message: MessageEvent<string>) => {
+      try {
+        const event = JSON.parse(message.data) as TimelineEvent;
+        setLive((current) => applyTimelineEvent(current, event));
+      } catch {
+        // Ignore malformed events; the next refresh replays the append-only log.
+      }
+    };
+    source.addEventListener('convoy', handleMessage as EventListener);
+    source.addEventListener('convoy-end', () => source.close());
+    return () => {
+      source.removeEventListener('convoy', handleMessage as EventListener);
+      source.close();
+    };
+  }, [enabled, runId]);
+
+  return live;
+}
+
+export interface TimelineProps {
+  readonly runId: string;
+  readonly initial: TimelineSnapshot;
+  readonly live?: TimelineLiveState;
 }
 
 function runStatusAfterEvent(current: string, event: TimelineEvent): string {
@@ -93,31 +127,10 @@ export function applyTimelineEvent(
   return { events: [...current.events, event], items, runStatus };
 }
 
-export function Timeline({ runId, initial }: TimelineProps) {
-  const [live, setLive] = useState<TimelineLiveState>({
-    events: initial.events,
-    items: initial.items,
-    runStatus: initial.run.status,
-  });
+export function Timeline({ runId, initial, live: providedLive }: TimelineProps) {
+  const internalLive = useTimelineLive(runId, initial, providedLive === undefined);
+  const live = providedLive ?? internalLive;
   const [selected, setSelected] = useState<number | null>(null);
-
-  useEffect(() => {
-    const source = new EventSource(`/api/runs/${encodeURIComponent(runId)}/stream`);
-    const handleMessage = (message: MessageEvent<string>) => {
-      try {
-        const event = JSON.parse(message.data) as TimelineEvent;
-        setLive((current) => applyTimelineEvent(current, event));
-      } catch {
-        // Ignore malformed events; the next refresh replays the append-only log.
-      }
-    };
-    source.addEventListener('convoy', handleMessage as EventListener);
-    source.addEventListener('convoy-end', () => source.close());
-    return () => {
-      source.removeEventListener('convoy', handleMessage as EventListener);
-      source.close();
-    };
-  }, [runId]);
 
   const activeItem = useMemo(
     () => (selected === null ? null : (live.items.find((item) => item.idx === selected) ?? null)),

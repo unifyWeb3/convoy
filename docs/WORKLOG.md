@@ -838,8 +838,7 @@ details, and opens an audit drawer with Planner rationale, Critic/simulate evide
 transaction links, and the ConvoyRegistry commit.
 
 The existing manifest exporter remains available as the second run tab. `apps/web/test` covers the
-route replay contract and server rendering. **318 tests** (db 35 · kh-client 127 · web 72 · worker
-88) · Foundry 45 · web typecheck/lint/build green. Playwright discovered the refresh spec and the
+route replay contract and server rendering. **318 tests** (db 35 · kh-client 127 · web 72 · worker 88) · Foundry 45 · web typecheck/lint/build green. Playwright discovered the refresh spec and the
 local server/database were available, but Chromium could not launch; its CDN installation reset and
 then stalled. No browser pass is claimed. Next: CVY-013 — DAG view + deferral + onchain
 check-and-execute gate.
@@ -861,3 +860,46 @@ The browser maps the pre-seal event to `SEALING`, then the final event to `SEALE
 guards clean. Chromium E2E is still not claimed: the current spec proves database replay and an open
 continuing SSE connection, not a newly appended event arriving after refresh. Overall completion
 stays **68%**; this corrects CVY-009 and does not begin CVY-013.
+
+## 2026-08-07 — CVY-013: live DAG and onchain dependency gate
+
+CVY-013 is implemented, reviewed and approved. `RunDetail` now owns one append-only SSE
+stream shared by Timeline and a React Flow DAG tab. The DAG renders dependency edges in the declared
+direction, derives node colours through Timeline's chronological reducer, and pulses deferred edges
+until their prerequisite lands.
+
+The app-side deferral rule remains authoritative: every declared dependency must be `LANDED` before
+release. A released dependency-bearing item first lands `commitAction`; only a `completed` result with
+a transaction hash can advance it. The target then goes through KeeperHub's flat
+`check-and-execute` request, reading `ConvoyRegistry.isCommitted(runIdOnchain, lowestDependencyIdx)`
+with `eq true`. The action is the real target write, so there is no second `writeContractCall`.
+An unmet condition records `{met, observedValue, targetValue, operator}`, creates no execution ID and
+terminates the item as `FAILED`, preventing a release loop. Multiple dependencies remain fully checked
+by the app gate; the lowest index is used only for the one additional atomic condition.
+
+The first live capability probe used a genuinely false registry condition and returned HTTP 200
+with `executed:false`, no `executionId`, and `conditionResult` fields. This measured response drift
+is recorded as G-38 and handled in `@convoy/kh-client`; no API key was printed.
+
+A controlled two-item Base Sepolia run then proved the met path without beginning GATE 2. Run
+`7c047809-319f-4ccb-a78f-a05d0b3d4afd` sealed `SEALED_OK`. Item 0 genuinely landed
+`enableMarket(13080701)` before item 1 left `DEFERRED`; item 1 then executed
+`enableMarket(13080702)` exactly once through check-and-execute. Its observed condition was
+`{met:true, observedValue:"true", targetValue:"true", operator:"eq"}` and execution
+`z7sp2l9u78s46fno26m2p` landed as
+[`0x6d1150d70a9aeae55b6a1035e629c590acf37fb97098eace15db3ff3f2e6058d`](https://sepolia.basescan.org/tx/0x6d1150d70a9aeae55b6a1035e629c590acf37fb97098eace15db3ff3f2e6058d).
+Post-run reads found both markets enabled and both registry commitments true. G-35 is mitigated by
+the commit-result guard, including the completed-without-hash case.
+
+Review also exposed a Next generated-state collision. A stale `next dev` process remained on port
+3001 while `next build` rewrote the same `.next` directory; the active run page then failed on a
+missing React Flow vendor chunk. The mixed trees were preserved under `/tmp`. Stopping the dev
+process and restarting from an empty `.next` restored the route, confirming G-39's cause. G-39 stays
+open because isolation is not enforced across sessions; never run build and dev against the same
+generated directory concurrently.
+
+Chromium 151 and Playwright's matching headless shell were installed through resumable downloads.
+The repository's `refresh.replay.spec.ts` passed, and separate desktop/tablet/mobile screenshots
+verified Timeline and DAG rendering on both the seeded replay run and the real CVY-013 Base Sepolia
+run. The CVY-013 milestone report is [`docs/milestones/CVY-013.md`](milestones/CVY-013.md). Next is
+CVY-GATE2, which was not begun.
