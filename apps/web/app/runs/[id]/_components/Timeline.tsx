@@ -64,6 +64,18 @@ export interface TimelineLiveState {
   readonly runStatus: string;
 }
 
+function runStatusAfterEvent(current: string, event: TimelineEvent): string {
+  if (event.type === 'RUN_OPENED') return 'PLANNING';
+  if (event.type === 'PLAN_READY') {
+    return Array.isArray(event.payload['ready']) ? 'EXECUTING' : 'CRITIQUING';
+  }
+  if (event.type === 'RUN_SEALED') {
+    return event.payload['phase'] === 'sealing' ? 'SEALING' : 'SEALED_OK';
+  }
+  if (event.type === 'RUN_SEALED_PARTIAL') return 'SEALED_PARTIAL';
+  return current;
+}
+
 export function applyTimelineEvent(
   current: TimelineLiveState,
   event: TimelineEvent,
@@ -77,12 +89,7 @@ export function applyTimelineEvent(
             ? { ...item, attempts: event.attempts ?? item.attempts }
             : item,
         );
-  const runStatus =
-    event.type === 'RUN_SEALED'
-      ? 'SEALED_OK'
-      : event.type === 'RUN_SEALED_PARTIAL'
-        ? 'SEALED_PARTIAL'
-        : current.runStatus;
+  const runStatus = runStatusAfterEvent(current.runStatus, event);
   return { events: [...current.events, event], items, runStatus };
 }
 

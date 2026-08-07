@@ -155,6 +155,25 @@ describe('Timeline', () => {
     expect(html).toContain('code: N-0001');
   });
 
+  it('treats pre-seal RUN_SEALED as SEALING until the final event', () => {
+    const initial: TimelineLiveState = {
+      events: [],
+      items: [item(0)],
+      runStatus: 'EXECUTING',
+    };
+    const sealing = applyTimelineEvent(initial, {
+      ...event('1', 0, 'RUN_SEALED', { phase: 'sealing' }),
+      itemIdx: null,
+    });
+    const sealed = applyTimelineEvent(sealing, {
+      ...event('2', 0, 'RUN_SEALED_PARTIAL'),
+      itemIdx: null,
+    });
+
+    expect(sealing.runStatus).toBe('SEALING');
+    expect(sealed.runStatus).toBe('SEALED_PARTIAL');
+  });
+
   it('shows required veto and failure details', () => {
     const vetoed = item(0, { state: 'VETOED', vetoReason: 'would_revert' });
     const failed = item(1, { state: 'FAILED' });

@@ -23,7 +23,7 @@ target at CVY-019, not the development target.
 | CVY-007   | Budget meter + gas→USDC accounting                          | DONE        | 100 | Pinned formula; BUDGET_LOW at 20%; payer split added at DEC-010           |
 | CVY-008   | Orchestrator + RUN/ITEM state machine                       | DONE        | 100 | 3-item batch RECEIVED→SEALED_OK on 84532; DEC-006/007 measured; gap G-29  |
 | CVY-GATE1 | **GATE 1** — thin slice, real tx landed via Convoy          | **PASSED**  | 100 | Called by the operator 2026-08-04                                         |
-| CVY-009   | SSE timeline UI + audit drawer + replay                     | DONE        | 100 | 72 web tests; browser E2E pending Chromium runtime download               |
+| CVY-009   | SSE timeline UI + audit drawer + replay                     | DONE        | 100 | 77 web tests; terminal status race fixed; browser E2E still unclaimed     |
 | CVY-010   | Planner + zod schema + repair + eval                        | DONE        | 100 | Measured: JSON 29/29, recall 0.946, 0 cycles. D-030/031/032               |
 | CVY-011   | Critic + simulate veto + corroboration                      | DONE        | 100 | 5/5 invalid vetoed, 5/5 valid approved, 0 false vetoes; G-34 mitigated    |
 | CVY-012   | Manifest exporter: 3-way reconcile + sha256                 | DONE        | 100 | 3-source rows; stable hash; cached JSON; copy/download; G-24 mitigated    |

@@ -25,12 +25,12 @@ vi.mock('../lib/events', () => ({
 
 import { GET } from '../app/api/runs/[id]/stream/route';
 
-const event = (id: string, type = 'RUN_RECEIVED') => ({
+const event = (id: string, type = 'RUN_RECEIVED', payload: Record<string, unknown> = {}) => ({
   id,
   runId: 'run-1',
   itemIdx: null,
   type,
-  payload: {},
+  payload,
   at: '2026-08-06T00:00:00.000Z',
 });
 
@@ -46,6 +46,7 @@ describe('GET /api/runs/:id/stream', () => {
       events: [],
     });
     mocks.readEventsAfter.mockResolvedValueOnce([event('8'), event('9', 'RUN_SEALED')]);
+    mocks.readRunStatus.mockResolvedValueOnce('SEALED_OK');
     const response = await GET(
       new Request('http://convoy.test/api/runs/run-1/stream', {
         headers: { 'Last-Event-ID': '7' },
@@ -58,6 +59,32 @@ describe('GET /api/runs/:id/stream', () => {
     expect(text).toContain('id: 8');
     expect(text).toContain('id: 9');
     expect(mocks.readEventsAfter).toHaveBeenCalledWith('run-1', 7n);
+  });
+
+  it('keeps streaming past the pre-seal RUN_SEALED event', async () => {
+    mocks.loadTimeline.mockResolvedValue({
+      run: { id: 'run-1', status: 'EXECUTING' },
+      items: [],
+      events: [],
+    });
+    mocks.readEventsAfter
+      .mockResolvedValueOnce([event('8', 'RUN_SEALED', { phase: 'sealing' })])
+      .mockResolvedValueOnce([event('9', 'RUN_SEALED_PARTIAL')]);
+    mocks.readRunStatus
+      .mockResolvedValueOnce('SEALING')
+      .mockResolvedValueOnce('SEALED_PARTIAL');
+
+    const response = await GET(
+      new Request('http://convoy.test/api/runs/run-1/stream', {
+        headers: { 'Last-Event-ID': '7' },
+      }),
+      { params: { id: 'run-1' } },
+    );
+    const text = await response.text();
+
+    expect(text).toContain('id: 8');
+    expect(text).toContain('id: 9');
+    expect(mocks.readEventsAfter).toHaveBeenNthCalledWith(2, 'run-1', 8n);
   });
 
   it('returns 404 for an unknown run', async () => {

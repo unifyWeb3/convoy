@@ -843,3 +843,21 @@ route replay contract and server rendering. **318 tests** (db 35 · kh-client 12
 local server/database were available, but Chromium could not launch; its CDN installation reset and
 then stalled. No browser pass is claimed. Next: CVY-013 — DAG view + deferral + onchain
 check-and-execute gate.
+
+## 2026-08-07 — CVY-009 corrective review: terminal stream ordering
+
+The retry/audit corrective pass landed as `8e8ea05` with its Chromium limitation disclosed. Review
+then found a separate sealing race: `phaseSeal` emits `RUN_SEALED { phase: "sealing" }` on entry to
+`SEALING`, before the KeeperHub `sealRun` call, and emits the actual terminal event afterward. The
+SSE route and browser had treated the first event name as `SEALED_OK`, closing the stream early and
+potentially hiding a later `RUN_SEALED_PARTIAL`.
+
+Terminality now comes from the run row. The route reads status before its ordered event query, so a
+terminal state and its transactionally paired final event cannot be observed in the wrong order.
+The browser maps the pre-seal event to `SEALING`, then the final event to `SEALED_OK` or
+`SEALED_PARTIAL`. Regression tests pin the pre-seal-to-partial sequence.
+
+**77/77 web tests** · web typecheck/lint/build green · scripts typecheck green · four invariant
+guards clean. Chromium E2E is still not claimed: the current spec proves database replay and an open
+continuing SSE connection, not a newly appended event arriving after refresh. Overall completion
+stays **68%**; this corrects CVY-009 and does not begin CVY-013.
