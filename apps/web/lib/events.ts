@@ -7,6 +7,8 @@ export interface TimelineEvent {
   readonly type: string;
   readonly payload: Record<string, unknown>;
   readonly at: string;
+  /** Current ledger attempts for this item when the event was streamed. */
+  readonly attempts?: readonly TimelineAttempt[];
 }
 
 export interface TimelineAttempt {
@@ -102,6 +104,18 @@ function plannerRationale(plan: unknown, idx: number): string | null {
   return null;
 }
 
+function attemptOrder(a: Attempt, b: Attempt): number {
+  if (a.attemptNo !== b.attemptNo) return a.attemptNo - b.attemptNo;
+  const phase = (kind: string): number =>
+    kind === 'SIMULATE' ? 0 : kind === 'COMMIT' ? 1 : kind === 'EXECUTE' ? 2 : 3;
+  const phaseOrder = phase(a.kind) - phase(b.kind);
+  return phaseOrder !== 0 ? phaseOrder : a.createdAt.getTime() - b.createdAt.getTime();
+}
+
+function attemptsForItem(attempts: Attempt[]): TimelineAttempt[] {
+  return [...attempts].sort(attemptOrder).map(toAttempt);
+}
+
 function toItem(item: Item & { attempts: Attempt[] }, plan: unknown): TimelineItem {
   return {
     idx: item.idx,
@@ -114,7 +128,7 @@ function toItem(item: Item & { attempts: Attempt[] }, plan: unknown): TimelineIt
     dependsOn: item.dependsOn,
     gasBudgetUsdc: item.gasBudgetUsdc?.toString() ?? null,
     vetoReason: item.vetoReason,
-    attempts: [...item.attempts].sort((a, b) => a.attemptNo - b.attemptNo).map(toAttempt),
+    attempts: attemptsForItem(item.attempts),
   };
 }
 
@@ -123,7 +137,21 @@ export async function readEventsAfter(runId: string, lastId: bigint): Promise<Ti
     where: { runId, id: { gt: lastId } },
     orderBy: { id: 'asc' },
   });
-  return events.map(toEvent);
+  if (events.length === 0) return [];
+
+  // Attempts are ledger rows, not a new remote capability. Attach the current
+  // append-only attempt view to item events so a connected audit drawer learns
+  // about SIMULATE/COMMIT/EXECUTE rows after the page first loaded.
+  const items = await db.item.findMany({
+    where: { runId },
+    select: { idx: true, attempts: true },
+  });
+  const attemptsByIdx = new Map(items.map((item) => [item.idx, attemptsForItem(item.attempts)]));
+  return events.map((event) => {
+    const mapped = toEvent(event);
+    if (event.itemIdx === null) return mapped;
+    return { ...mapped, attempts: attemptsByIdx.get(event.itemIdx) ?? [] };
+  });
 }
 
 export async function readRunStatus(runId: string): Promise<string | null> {

@@ -2,8 +2,9 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 
-import { AuditDrawer } from './AuditDrawer';
 import type { TimelineEvent, TimelineItem, TimelineSnapshot } from '@/lib/events';
+
+import { AuditDrawer } from './AuditDrawer';
 
 const FLOW = ['PLANNED', 'SIMULATED', 'COMMITTED', 'SUBMITTED', 'LANDED'] as const;
 
@@ -15,23 +16,32 @@ function chipClass(state: string): string {
   return 'border-sky-200 bg-sky-50 text-sky-800';
 }
 
-function itemState(item: TimelineItem, events: readonly TimelineEvent[]): string {
-  const itemEvents = events.filter((event) => event.itemIdx === item.idx);
-  const terminal = [...itemEvents]
-    .reverse()
-    .find((event) =>
-      ['ITEM_LANDED', 'ITEM_VETOED', 'ITEM_FAILED', 'ITEM_RETRY'].includes(event.type),
-    );
-  if (terminal?.type === 'ITEM_LANDED') return 'LANDED';
-  if (terminal?.type === 'ITEM_VETOED') return 'VETOED';
-  if (terminal?.type === 'ITEM_FAILED') return 'FAILED';
-  if (terminal?.type === 'ITEM_RETRY') return 'RETRYING';
-  const phases = itemEvents.map((event) => event.type);
-  if (phases.includes('ITEM_SUBMITTED')) return 'SUBMITTED';
-  if (phases.includes('ITEM_COMMITTED')) return 'COMMITTED';
-  if (phases.includes('ITEM_SIMULATED')) return 'SIMULATED';
-  if (phases.includes('ITEM_DEFERRED')) return 'DEFERRED';
-  return item.state === 'PENDING' ? 'PLANNED' : item.state;
+const EVENT_STATE: Readonly<Record<string, string>> = {
+  PLAN_READY: 'PLANNED',
+  ITEM_DEFERRED: 'DEFERRED',
+  ITEM_SIMULATED: 'SIMULATED',
+  ITEM_VETOED: 'VETOED',
+  ITEM_COMMITTED: 'COMMITTED',
+  ITEM_SUBMITTED: 'SUBMITTED',
+  ITEM_RETRY: 'RETRYING',
+  ITEM_LANDED: 'LANDED',
+  ITEM_FAILED: 'FAILED',
+};
+
+function compareEventIds(a: TimelineEvent, b: TimelineEvent): number {
+  if (/^\d+$/.test(a.id) && /^\d+$/.test(b.id)) {
+    const left = BigInt(a.id);
+    const right = BigInt(b.id);
+    return left < right ? -1 : left > right ? 1 : 0;
+  }
+  return a.id.localeCompare(b.id);
+}
+
+export function deriveItemState(item: TimelineItem, events: readonly TimelineEvent[]): string {
+  let state = item.state === 'PENDING' ? 'PLANNED' : item.state;
+  const itemEvents = events.filter((event) => event.itemIdx === item.idx).sort(compareEventIds);
+  for (const event of itemEvents) state = EVENT_STATE[event.type] ?? state;
+  return state;
 }
 
 function eventDetail(event: TimelineEvent): string | null {
@@ -48,21 +58,48 @@ export interface TimelineProps {
   readonly initial: TimelineSnapshot;
 }
 
+export interface TimelineLiveState {
+  readonly events: readonly TimelineEvent[];
+  readonly items: readonly TimelineItem[];
+  readonly runStatus: string;
+}
+
+export function applyTimelineEvent(
+  current: TimelineLiveState,
+  event: TimelineEvent,
+): TimelineLiveState {
+  if (current.events.some((item) => item.id === event.id)) return current;
+  const items =
+    event.itemIdx === null || event.attempts === undefined
+      ? current.items
+      : current.items.map((item) =>
+          item.idx === event.itemIdx
+            ? { ...item, attempts: event.attempts ?? item.attempts }
+            : item,
+        );
+  const runStatus =
+    event.type === 'RUN_SEALED'
+      ? 'SEALED_OK'
+      : event.type === 'RUN_SEALED_PARTIAL'
+        ? 'SEALED_PARTIAL'
+        : current.runStatus;
+  return { events: [...current.events, event], items, runStatus };
+}
+
 export function Timeline({ runId, initial }: TimelineProps) {
-  const [events, setEvents] = useState<readonly TimelineEvent[]>(initial.events);
+  const [live, setLive] = useState<TimelineLiveState>({
+    events: initial.events,
+    items: initial.items,
+    runStatus: initial.run.status,
+  });
   const [selected, setSelected] = useState<number | null>(null);
-  const [runStatus, setRunStatus] = useState(initial.run.status);
 
   useEffect(() => {
     const source = new EventSource(`/api/runs/${encodeURIComponent(runId)}/stream`);
     const handleMessage = (message: MessageEvent<string>) => {
       try {
         const event = JSON.parse(message.data) as TimelineEvent;
-        setEvents((current) =>
-          current.some((item) => item.id === event.id) ? current : [...current, event],
-        );
-        if (event.type === 'RUN_SEALED') setRunStatus('SEALED_OK');
-        if (event.type === 'RUN_SEALED_PARTIAL') setRunStatus('SEALED_PARTIAL');
+        setLive((current) => applyTimelineEvent(current, event));
       } catch {
         // Ignore malformed events; the next refresh replays the append-only log.
       }
@@ -76,9 +113,8 @@ export function Timeline({ runId, initial }: TimelineProps) {
   }, [runId]);
 
   const activeItem = useMemo(
-    () =>
-      selected === null ? null : (initial.items.find((item) => item.idx === selected) ?? null),
-    [initial.items, selected],
+    () => (selected === null ? null : (live.items.find((item) => item.idx === selected) ?? null)),
+    [live.items, selected],
   );
 
   return (
@@ -90,15 +126,15 @@ export function Timeline({ runId, initial }: TimelineProps) {
             Execution timeline
           </h1>
         </div>
-        <span className={`border px-2 py-1 text-xs font-semibold ${chipClass(runStatus)}`}>
-          {runStatus}
+        <span className={`border px-2 py-1 text-xs font-semibold ${chipClass(live.runStatus)}`}>
+          {live.runStatus}
         </span>
       </div>
 
       <div className="space-y-2" role="list" aria-label="Run items">
-        {initial.items.map((item) => {
-          const state = itemState(item, events);
-          const itemEvents = events.filter((event) => event.itemIdx === item.idx);
+        {live.items.map((item) => {
+          const state = deriveItemState(item, live.events);
+          const itemEvents = live.events.filter((event) => event.itemIdx === item.idx);
           const retries = itemEvents.filter((event) => event.type === 'ITEM_RETRY');
           const gas = itemEvents.find((event) => event.type === 'ITEM_LANDED')?.payload[
             'gasUsdcConsumed'
@@ -173,7 +209,7 @@ export function Timeline({ runId, initial }: TimelineProps) {
       </div>
 
       {activeItem !== null ? (
-        <AuditDrawer item={activeItem} events={events} onClose={() => setSelected(null)} />
+        <AuditDrawer item={activeItem} events={live.events} onClose={() => setSelected(null)} />
       ) : null}
     </section>
   );

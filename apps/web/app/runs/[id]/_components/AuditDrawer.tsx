@@ -82,38 +82,68 @@ export function AuditDrawer({ item, events, onClose }: AuditDrawerProps) {
         <section>
           <h3 className="font-semibold text-zinc-950">Attempts</h3>
           <div className="mt-2 space-y-2">
-            {item.attempts.length === 0 ? (
+            {item.attempts.length === 0 &&
+            itemEvents.filter((event) => event.type === 'ITEM_RETRY').length === 0 ? (
               <p className="text-zinc-500">No KeeperHub attempts. 0 gas.</p>
             ) : (
-              item.attempts.map((attempt) => (
-                <div
-                  key={`${attempt.kind}-${attempt.attemptNo}`}
-                  className="border border-zinc-200 p-3"
-                >
-                  <div className="flex justify-between">
-                    <span className="font-mono text-xs">
-                      {attempt.kind} #{attempt.attemptNo + 1}
-                    </span>
-                    <span className="text-xs text-zinc-500">{attempt.khStatus ?? 'recorded'}</span>
+              <>
+                {item.attempts.map((attempt) => (
+                  <div
+                    key={`${attempt.kind}-${attempt.attemptNo}`}
+                    className="border border-zinc-200 p-3"
+                  >
+                    <div className="flex justify-between">
+                      <span className="font-mono text-xs">
+                        {attempt.kind} #{attempt.attemptNo + 1}
+                      </span>
+                      <span className="text-xs text-zinc-500">
+                        {attempt.khStatus ?? 'recorded'}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-zinc-600">
+                      gas {attempt.gasUsedUsdc ?? '0'} USDC
+                    </p>
+                    {attempt.transactionHash ? (
+                      <p className="mt-1 break-all font-mono text-xs text-zinc-700">
+                        hash: {attempt.transactionHash}
+                      </p>
+                    ) : null}
+                    {attempt.transactionLink ? (
+                      <a
+                        className="mt-1 block break-all font-mono text-xs text-sky-700 underline"
+                        href={attempt.transactionLink}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {attempt.transactionLink}
+                      </a>
+                    ) : null}
+                    {attempt.errorCode ? (
+                      <p className="mt-1 text-xs text-red-700">{attempt.errorCode}</p>
+                    ) : null}
                   </div>
-                  <p className="mt-1 text-xs text-zinc-600">
-                    gas {attempt.gasUsedUsdc ?? '0'} USDC
-                  </p>
-                  {attempt.transactionLink ? (
-                    <a
-                      className="mt-1 block break-all font-mono text-xs text-sky-700 underline"
-                      href={attempt.transactionLink}
-                      target="_blank"
-                      rel="noreferrer"
+                ))}
+                {itemEvents
+                  .filter((event) => event.type === 'ITEM_RETRY')
+                  .map((retry) => (
+                    <div
+                      key={`retry-${retry.id}`}
+                      className="border border-amber-200 bg-amber-50 p-3"
                     >
-                      {attempt.transactionHash ?? attempt.transactionLink}
-                    </a>
-                  ) : null}
-                  {attempt.errorCode ? (
-                    <p className="mt-1 text-xs text-red-700">{attempt.errorCode}</p>
-                  ) : null}
-                </div>
-              ))
+                      <div className="flex justify-between">
+                        <span className="font-mono text-xs">
+                          RETRY #{String(retry.payload['attempt'] ?? 'unknown')}
+                        </span>
+                        <span className="text-xs text-amber-800">observed</span>
+                      </div>
+                      <p className="mt-1 text-xs text-amber-900">
+                        {retry.payload['code'] === null || retry.payload['code'] === undefined
+                          ? 'transient retry observed'
+                          : `code: ${String(retry.payload['code'])}`}
+                      </p>
+                    </div>
+                  ))}
+              </>
             )}
           </div>
         </section>
