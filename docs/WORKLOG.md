@@ -940,3 +940,23 @@ timeout and a transient first-create connection failure. After a clean restart o
 DB passed 35/35 and worker passed 95/95; the gap stays open because the harness remains
 timing-sensitive. No cut is applied and no post-gate milestone is begun; the next critical-path work
 is CVY-015.
+
+## 2026-08-08 — CVY-015: idempotency + crash-resume implementation
+
+Implemented the CVY-015 recovery path without changing chain semantics. Attempts are prepared before
+KeeperHub submission, execution IDs are persisted before polling, and a resumed or stalled job polls
+the recorded execution instead of broadcasting again. Missing execution IDs reissue the same
+phase-folded key; `idempotency_in_progress` remains a same-key transport retry, while
+`idempotency_conflict` fails safely and is surfaced in the item failure event. Completed executions
+without a transaction hash never become `LANDED`, and status failures distinguish documented coded
+transients from terminal config reverts.
+
+The four BullMQ handlers now delegate to the one resumable `runBatch`/orchestrator lifecycle. POST
+`/api/runs` validates an existing run ID and enqueues the deduplicated plan job; it does not add run
+creation, history, wallet, analytics, or another execution rail. Phase-folded idempotency helpers
+are centralized in `@convoy/kh-client` and preserve the frozen three-part key shape.
+
+Deterministic tests: kh-client 131, worker 103, web 84. DB passed 35/35 on a clean isolated rerun;
+the initial DB attempt timed out on the first schema query (G-32). The live Base Sepolia kill/restart
+acceptance was not run because this worker process lacked usable KeeperHub/Base Sepolia runtime
+configuration. No live identifiers or duplicate-hash result are claimed.

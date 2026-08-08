@@ -14,6 +14,19 @@ export interface HandlerContext {
   readonly log: (message: string) => void;
 }
 
+/** Production handlers share the single runBatch/orchestrator path. */
+export async function runProductionLifecycle(ctx: HandlerContext): Promise<HandlerResult> {
+  const { runBatch, khFromEnv } = await import('../runBatch.js');
+  const registryAddr = process.env['CONVOY_REGISTRY_ADDR'];
+  if (registryAddr === undefined || registryAddr === '') {
+    throw new Error('CONVOY_REGISTRY_ADDR is not set');
+  }
+  const result = await runBatch({ kh: khFromEnv(), registryAddr, log: ctx.log }, ctx.data.runId, {
+    fanout: Number(process.env['CONVOY_EXECUTE_FANOUT'] ?? '4'),
+  });
+  return { outcome: 'done', detail: `${result.status} run ${result.runId}` };
+}
+
 export interface HandlerResult {
   /** `skipped` means the work was already done — the idempotent re-run path. */
   readonly outcome: 'done' | 'skipped';

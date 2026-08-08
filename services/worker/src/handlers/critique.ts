@@ -14,10 +14,14 @@
 // Recorded as gap G-33; the queue path is CVY-015's to connect, alongside
 // crash-resume.
 
-import { throwIfAborted, type HandlerContext, type HandlerResult } from './types.js';
+import {
+  runProductionLifecycle,
+  throwIfAborted,
+  type HandlerContext,
+  type HandlerResult,
+} from './types.js';
 
 export async function handleCritique(ctx: HandlerContext): Promise<HandlerResult> {
   throwIfAborted(ctx);
-  ctx.log('critique: skeleton — the live path is phaseCritique via runBatch (G-33)');
-  return await Promise.resolve({ outcome: 'done', detail: 'critique skeleton' });
+  return await runProductionLifecycle(ctx);
 }

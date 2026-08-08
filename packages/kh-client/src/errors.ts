@@ -16,7 +16,23 @@
 export type KhErrorClass = 'fatal' | 'fatal-to-run' | 'transient' | 'item-failed';
 
 /** Coded run errors documented as transient: E-000x / N-000x / P-000x / C-0001-2. */
-const CODED_RUN_ERROR = /\b([ENPC]-\d{4})\b/;
+const CODED_RUN_ERROR = /\b((?:[ENP]-\d{4}|C-000[12]))\b/;
+
+/**
+ * Find a documented transient code in either an HTTP error body or a status
+ * record. Status failures arrive on HTTP 200, so recovery cannot rely on the
+ * HTTP classifier alone.
+ */
+export function transientRunErrorCode(value: unknown): string | undefined {
+  if (typeof value === 'string') return CODED_RUN_ERROR.exec(value)?.[1];
+  if (value === null || typeof value !== 'object') return undefined;
+  const body = value as Record<string, unknown>;
+  for (const key of ['code', 'errorCode', 'error', 'message', 'detail', 'revertReason']) {
+    const found = transientRunErrorCode(body[key]);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
 
 export interface KhErrorInit {
   readonly message: string;
@@ -97,7 +113,7 @@ export function classifyHttpError(input: ClassifyInput): KhError {
   const nowMs = input.nowMs ?? Date.now();
   const message = extractMessage(body);
   const retryAfterMs = parseRetryAfter(input.headers?.get('retry-after') ?? null, nowMs);
-  const coded = CODED_RUN_ERROR.exec(message)?.[1];
+  const coded = transientRunErrorCode(body) ?? transientRunErrorCode(message);
 
   const mk = (classification: KhErrorClass, reason: string): KhError =>
     new KhError({

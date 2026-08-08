@@ -10,6 +10,13 @@ import type { AttemptRef } from './types.js';
 
 export const IDEMPOTENCY_HEADER = 'Idempotency-Key';
 
+export type IdempotencyPhase = 'o' | 'c' | 'x' | 's';
+
+export function foldRunIdForPhase(runId: string, phase: IdempotencyPhase): string {
+  if (runId === '') throw new Error('idempotency: runId must not be empty');
+  return `${runId.slice(0, 8)}-${phase}`;
+}
+
 /** `runId` must not contain the separator, or keys become ambiguous. */
 export function buildIdempotencyKey(ref: AttemptRef): string {
   const { runId, idx, attempt } = ref;
@@ -24,6 +31,21 @@ export function buildIdempotencyKey(ref: AttemptRef): string {
     throw new Error(`idempotency: attempt must be a non-negative integer (got ${String(attempt)})`);
   }
   return `${runId}:${idx}:${attempt}`;
+}
+
+/**
+ * Build Convoy's phase-folded key without changing the frozen three-part
+ * `<runId>:<idx>:<attempt>` structure. The eight-character run component is
+ * the established G-29 mitigation and is intentionally shared by recovery and
+ * the initial submission.
+ */
+export function buildPhaseIdempotencyKey(
+  runId: string,
+  phase: IdempotencyPhase,
+  idx: number,
+  attempt: number,
+): string {
+  return buildIdempotencyKey({ runId: foldRunIdForPhase(runId, phase), idx, attempt });
 }
 
 /** Inverse of {@link buildIdempotencyKey}; used by the manifest reconciler. */

@@ -25,7 +25,7 @@ import {
 import {
   KhClient,
   KhError,
-  getExecutionStatus,
+  foldRunIdForPhase,
   pollUntilTerminal,
   simulateContractCall,
   writeContractCall,
@@ -44,6 +44,16 @@ import {
 } from './budget.js';
 import { readGasPriceWei, readReceiptGas } from './receipt.js';
 import { executeWithDependencyGate, selectOnchainDependency } from './gates/checkAndExecute.js';
+import {
+  classifyExecutionStatus,
+  getOrCreateAttempt,
+  latestAttempt,
+  persistExecutionId,
+  persistObservation,
+  persistSubmissionError,
+  pollPersistedExecution,
+  type PersistedAttempt,
+} from './reconcile.js';
 
 export const MAX_ONCHAIN_RETRIES = 2;
 
@@ -158,7 +168,10 @@ function hexBytes(hex: string): Buffer {
  * preserved exactly. `-` and not `:`, which `buildIdempotencyKey` rejects.
  */
 function keyRun(runId: string, phase: 'o' | 'c' | 'x' | 's'): string {
-  return `${runId.slice(0, 8)}-${phase}`;
+  // Preserve the established phase-folded component. The frozen three-part
+  // shape is retained while the phase distinguishes open/commit/execute/seal
+  // writes (G-29).
+  return foldRunIdForPhase(runId, phase);
 }
 
 function abiFor(functionName: string): readonly unknown[] {
@@ -239,7 +252,33 @@ export async function phaseOpen(
   runIdOnchain: string,
 ): Promise<string> {
   const log = deps.log ?? ((): void => {});
-  await setRunStatus(runId, 'OPENING', 'RUN_RECEIVED', { runIdOnchain });
+  const existing = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
+  if (
+    ['PLANNING', 'CRITIQUING', 'EXECUTING', 'SEALING', 'SEALED_OK', 'SEALED_PARTIAL'].includes(
+      existing.status,
+    )
+  ) {
+    const opened = await prisma.event.findFirst({
+      where: { runId, type: 'RUN_OPENED' },
+      orderBy: { id: 'asc' },
+    });
+    const txHash =
+      opened?.payload !== null && typeof opened?.payload === 'object'
+        ? (opened.payload as { txHash?: unknown }).txHash
+        : undefined;
+    if (typeof txHash === 'string') return txHash;
+  }
+  if (existing.runIdOnchain === null) {
+    await prisma.run.update({
+      where: { id: runId },
+      data: { runIdOnchain: hexBytes(runIdOnchain) },
+    });
+  } else {
+    runIdOnchain = bytesToHex(existing.runIdOnchain);
+  }
+  if (existing.status !== 'OPENING') {
+    await setRunStatus(runId, 'OPENING', 'RUN_RECEIVED', { runIdOnchain });
+  }
 
   const write = await writeContractCall(
     deps.kh,
@@ -264,7 +303,7 @@ export async function phaseOpen(
   await prisma.$transaction([
     prisma.run.update({
       where: { id: runId },
-      data: { runIdOnchain: hexBytes(runIdOnchain), status: 'PLANNING' },
+      data: { status: 'PLANNING' },
     }),
     prisma.event.create({
       data: {
@@ -1013,10 +1052,6 @@ export async function phaseCritique(
   return { ready, vetoed, failedIdx, replanCycles: cycles, notes };
 }
 
-function isTransient(e: unknown): boolean {
-  return e instanceof KhError && e.classification === 'transient';
-}
-
 export interface ExecuteOutcome {
   readonly idx: number;
   readonly landed: boolean;
@@ -1077,15 +1112,31 @@ export async function executeItem(
   itemIdx: number,
   runIdOnchain: string,
   runEthUsd: Prisma.Decimal | string,
+  requestedAttempt = 0,
 ): Promise<ExecuteOutcome> {
   const log = deps.log ?? ((): void => {});
-  const item = await prisma.item.findUniqueOrThrow({
+  let item = await prisma.item.findUniqueOrThrow({
     where: { runId_idx: { runId, idx: itemIdx } },
   });
 
-  // GUARD: COMMITTED requires a prior SIMULATED (+ an APPROVE, from CVY-011).
-  if (item.state !== 'SIMULATED') {
-    log(`item ${itemIdx}: COMMIT guard blocked — state ${item.state}, not SIMULATED`);
+  if (item.state === 'LANDED') {
+    const prior = await latestAttempt(item.id, 'EXECUTE');
+    return {
+      idx: itemIdx,
+      landed: true,
+      ...(prior?.txHash === null || prior?.txHash === undefined
+        ? {}
+        : { txHash: bytesToHex(prior.txHash) }),
+      feeFromReceipt: false,
+      l1FeeIncluded: false,
+      ...(prior?.gasUsedWei === null || prior?.gasUsedWei === undefined
+        ? {}
+        : { feeWeiTotal: BigInt(prior.gasUsedWei.toString()) }),
+      sponsored: prior?.sponsored ?? null,
+      retries: prior?.attemptNo ?? 0,
+    };
+  }
+  if (['VETOED', 'FAILED', 'SKIPPED'].includes(item.state)) {
     return {
       idx: itemIdx,
       landed: false,
@@ -1096,56 +1147,123 @@ export async function executeItem(
     };
   }
 
-  const commit = await writeContractCall(
-    deps.kh,
-    {
-      contractAddress: deps.registryAddr,
-      functionName: 'commitAction',
-      functionArgs: [runIdOnchain, String(itemIdx), bytesToHex(item.payloadHash)],
-      abi: REGISTRY_ABI as unknown as readonly unknown[],
-    },
-    { runId: keyRun(runId, 'c'), idx: itemIdx, attempt: 0 },
-  );
-  const commitFinal = await pollUntilTerminal(deps.kh, commit);
-  await recordAttempt(item.id, 0, 'COMMIT', {
-    executionId: commit.executionId,
-    txHash:
-      commitFinal.transactionHash === undefined ? null : hexBytes(commitFinal.transactionHash),
-    txLink: commitFinal.transactionLink ?? null,
-    khStatus: commitFinal.status,
-  });
-  if (commitFinal.status !== 'completed' || commitFinal.transactionHash === undefined) {
-    await transitionItem({
-      runId,
-      itemIdx,
-      expect: ['SIMULATED'],
-      to: 'FAILED',
-      type: 'ITEM_FAILED',
-      payload: {
-        reason: 'commitAction did not land; target write blocked',
-        status: commitFinal.status,
-        txHash: commitFinal.transactionHash ?? null,
-      },
+  // COMMIT is itself a KeeperHub write. Persist its attempt before submission,
+  // and on restart poll its execution id (or reissue the same key when the id
+  // was not durably recorded yet).
+  if (item.state === 'SIMULATED') {
+    let commitAttempt = await latestAttempt(item.id, 'COMMIT');
+    let commitNo = commitAttempt?.attemptNo ?? 0;
+    for (;;) {
+      if (commitAttempt?.khStatus === 'failed' && commitAttempt.errorCode !== null) {
+        if (commitNo >= MAX_ONCHAIN_RETRIES) {
+          await transitionItem({
+            runId,
+            itemIdx,
+            expect: ['SIMULATED'],
+            to: 'FAILED',
+            type: 'ITEM_FAILED',
+            payload: {
+              reason: 'commitAction transient retry cap reached',
+              code: commitAttempt.errorCode,
+            },
+          });
+          return failedOutcome(itemIdx, commitNo);
+        }
+        commitNo += 1;
+        commitAttempt = undefined;
+      }
+      const durable = commitAttempt ?? (await getOrCreateAttempt(item.id, commitNo, 'COMMIT'));
+      try {
+        let current = durable;
+        if (current.executionId === null) {
+          const write = await writeContractCall(
+            deps.kh,
+            {
+              contractAddress: deps.registryAddr,
+              functionName: 'commitAction',
+              functionArgs: [runIdOnchain, String(itemIdx), bytesToHex(item.payloadHash)],
+              abi: REGISTRY_ABI as unknown as readonly unknown[],
+            },
+            { runId: keyRun(runId, 'c'), idx: itemIdx, attempt: commitNo },
+          );
+          current = await persistExecutionId(current.id, write);
+        }
+        const final = await pollPersistedExecution(deps.kh, current);
+        const observation = classifyExecutionStatus(final);
+        await persistObservation(current.id, observation);
+        if (observation.outcome === 'landed') {
+          await transitionItem({
+            runId,
+            itemIdx,
+            expect: ['SIMULATED'],
+            to: 'COMMITTED',
+            type: 'ITEM_COMMITTED',
+            payload: { txHash: observation.txHash, executionId: final.executionId },
+          });
+          break;
+        }
+        if (observation.outcome === 'retry' && commitNo < MAX_ONCHAIN_RETRIES) {
+          commitNo += 1;
+          commitAttempt = undefined;
+          continue;
+        }
+        await transitionItem({
+          runId,
+          itemIdx,
+          expect: ['SIMULATED'],
+          to: 'FAILED',
+          type: 'ITEM_FAILED',
+          payload:
+            observation.outcome === 'failed' && observation.status.status === 'completed'
+              ? {
+                  reason: 'commitAction did not land; target write blocked',
+                  status: observation.status.status,
+                  txHash: null,
+                }
+              : {
+                  reason:
+                    observation.outcome === 'retry'
+                      ? 'commitAction transient retry cap reached'
+                      : observation.reason,
+                  code: observation.outcome === 'retry' ? observation.code : null,
+                },
+        });
+        return failedOutcome(itemIdx, commitNo);
+      } catch (error) {
+        if (
+          error instanceof KhError &&
+          error.classification === 'transient' &&
+          error.code !== undefined
+        ) {
+          await persistSubmissionError(durable.id, {
+            status: 'failed',
+            code: error.code,
+            reason: error.message,
+          });
+          if (commitNo < MAX_ONCHAIN_RETRIES) {
+            commitNo += 1;
+            commitAttempt = undefined;
+            continue;
+          }
+          await failSubmission(runId, itemIdx, durable, error, ['SIMULATED']);
+          return failedOutcome(itemIdx, commitNo);
+        }
+        if (isUncertainSubmission(error)) throw error;
+        await failSubmission(runId, itemIdx, durable, error, ['SIMULATED']);
+        return failedOutcome(itemIdx, commitNo);
+      }
+    }
+    item = await prisma.item.findUniqueOrThrow({
+      where: { runId_idx: { runId, idx: itemIdx } },
     });
-    return {
-      idx: itemIdx,
-      landed: false,
-      feeFromReceipt: false,
-      l1FeeIncluded: false,
-      sponsored: null,
-      retries: 0,
-    };
   }
-  await transitionItem({
-    runId,
-    itemIdx,
-    expect: ['SIMULATED'],
-    to: 'COMMITTED',
-    type: 'ITEM_COMMITTED',
-    payload: { txHash: commitFinal.transactionHash ?? null },
-  });
 
-  let retries = 0;
+  // GUARD: the target write is reachable only after the real commit landed.
+  if (!['COMMITTED', 'SUBMITTED', 'RETRYING'].includes(item.state)) {
+    log(`item ${itemIdx}: COMMIT guard blocked — state ${item.state}, not SIMULATED`);
+    return failedOutcome(itemIdx, 0);
+  }
+
   const dependencyIdx = selectOnchainDependency(item.dependsOn);
   const action = {
     contractAddress: bytesToHex(item.targetAddr),
@@ -1153,121 +1271,125 @@ export async function executeItem(
     functionArgs: item.functionArgs as readonly unknown[],
     abi: abiFor(item.functionName),
   };
+
+  let attempt = await latestAttempt(item.id, 'EXECUTE');
+  let attemptNo = attempt?.attemptNo ?? requestedAttempt;
   for (;;) {
+    if (attempt?.khStatus === 'failed' && attempt.errorCode !== null) {
+      if (attemptNo >= MAX_ONCHAIN_RETRIES) {
+        await transitionItem({
+          runId,
+          itemIdx,
+          expect: ['SUBMITTED', 'COMMITTED', 'RETRYING'],
+          to: 'FAILED',
+          type: 'ITEM_FAILED',
+          payload: { reason: 'transient retry cap reached', code: attempt.errorCode },
+        });
+        return failedOutcome(itemIdx, attemptNo);
+      }
+      attemptNo += 1;
+      attempt = undefined;
+    }
+
+    const durable = attempt ?? (await getOrCreateAttempt(item.id, attemptNo, 'EXECUTE'));
     try {
-      let write: WriteResult;
+      let current = durable;
       let condition: CheckAndExecuteCondition | undefined;
-      if (dependencyIdx === undefined) {
-        write = await writeContractCall(deps.kh, action, {
-          runId: keyRun(runId, 'x'),
-          idx: itemIdx,
-          attempt: retries,
-        });
-      } else {
-        const gated = await executeWithDependencyGate({
-          kh: deps.kh,
-          registryAddr: deps.registryAddr,
-          runIdOnchain,
-          dependencyIdx,
-          action,
-          ref: { runId: keyRun(runId, 'x'), idx: itemIdx, attempt: retries },
-        });
-        condition = gated.condition;
-        if (!gated.executed || gated.executionId === undefined) {
-          await recordAttempt(item.id, retries, 'EXECUTE', {
-            executionId: null,
-            txHash: null,
-            txLink: null,
-            khStatus: gated.condition.met ? 'condition-met-action-not-executed' : 'condition-unmet',
-            revertReason: JSON.stringify(gated.condition),
-          });
-          await transitionItem({
-            runId,
-            itemIdx,
-            expect: ['COMMITTED', 'RETRYING'],
-            to: 'FAILED',
-            type: 'ITEM_FAILED',
-            payload: {
-              reason: gated.condition.met
-                ? 'KeeperHub condition passed but the action was not executed'
-                : 'onchain dependency condition unmet',
-              dependencyIdx,
-              condition: { ...gated.condition },
-            },
-          });
-          return {
+      if (current.executionId === null) {
+        let write: WriteResult;
+        if (dependencyIdx === undefined) {
+          write = await writeContractCall(deps.kh, action, {
+            runId: keyRun(runId, 'x'),
             idx: itemIdx,
-            landed: false,
-            feeFromReceipt: false,
-            l1FeeIncluded: false,
-            sponsored: null,
-            retries,
+            attempt: attemptNo,
+          });
+        } else {
+          const gated = await executeWithDependencyGate({
+            kh: deps.kh,
+            registryAddr: deps.registryAddr,
+            runIdOnchain,
+            dependencyIdx,
+            action,
+            ref: { runId: keyRun(runId, 'x'), idx: itemIdx, attempt: attemptNo },
+          });
+          condition = gated.condition;
+          if (!gated.executed || gated.executionId === undefined) {
+            const reason = gated.condition.met
+              ? 'KeeperHub condition passed but the action was not executed'
+              : 'onchain dependency condition unmet';
+            await persistSubmissionError(current.id, {
+              status: gated.condition.met ? 'condition-met-action-not-executed' : 'condition-unmet',
+              reason: JSON.stringify(gated.condition),
+            });
+            await transitionItem({
+              runId,
+              itemIdx,
+              expect: ['COMMITTED', 'RETRYING'],
+              to: 'FAILED',
+              type: 'ITEM_FAILED',
+              payload: { reason, dependencyIdx, condition: { ...gated.condition } },
+            });
+            return failedOutcome(itemIdx, attemptNo);
+          }
+          write = {
+            ...gated,
+            executionId: gated.executionId,
+            status: gated.status ?? 'pending',
           };
         }
-        write = {
-          ...gated,
-          executionId: gated.executionId,
-          status: gated.status ?? 'pending',
-        };
+        current = await persistExecutionId(current.id, write);
+        await transitionItem({
+          runId,
+          itemIdx,
+          expect: ['COMMITTED', 'RETRYING'],
+          to: 'SUBMITTED',
+          type: 'ITEM_SUBMITTED',
+          payload: {
+            executionId: write.executionId,
+            attempt: attemptNo,
+            ...(dependencyIdx === undefined || condition === undefined
+              ? {}
+              : { dependencyIdx, condition: { ...condition } }),
+          },
+        });
       }
-      await transitionItem({
-        runId,
-        itemIdx,
-        expect: ['COMMITTED', 'RETRYING'],
-        to: 'SUBMITTED',
-        type: 'ITEM_SUBMITTED',
-        payload: {
-          executionId: write.executionId,
-          attempt: retries,
-          ...(dependencyIdx === undefined || condition === undefined
-            ? {}
-            : { dependencyIdx, condition: { ...condition } }),
-        },
-      });
 
-      // GUARD (G-23): the terminal POST does NOT carry the hash. LANDED requires
-      // `completed` AND a non-null transactionHash from GET /status.
-      const final = await pollUntilTerminal(deps.kh, write);
-      const detail = await getExecutionStatus(deps.kh, write.executionId);
+      // Reconcile-before-act: a durable execution id always wins over submit.
+      const final = await pollPersistedExecution(deps.kh, current);
+      const observation = classifyExecutionStatus(final);
 
       // `GET /status` is the record that carries `sponsored`; the write POST
       // often does not. Payer attribution therefore comes from the detail read,
       // falling back to the write only if the detail omitted it.
-      const sponsored = detail.sponsored ?? final.sponsored ?? null;
+      const sponsored = final.sponsored ?? null;
       const fee =
         final.transactionHash === undefined
           ? { fromReceipt: false, l1FeeIncluded: false, weiTotal: undefined }
           : await composeFee(final.transactionHash, {
-              ...(detail.gasUsedUnits !== undefined ? { gasUsedUnits: detail.gasUsedUnits } : {}),
-              ...(detail.gasFeeWeiL2 !== undefined ? { gasFeeWeiL2: detail.gasFeeWeiL2 } : {}),
-              ...(detail.gasPriceWei !== undefined ? { gasPriceWei: detail.gasPriceWei } : {}),
+              ...(final.gasUsedUnits !== undefined ? { gasUsedUnits: final.gasUsedUnits } : {}),
+              ...(final.gasFeeWeiL2 !== undefined ? { gasFeeWeiL2: final.gasFeeWeiL2 } : {}),
+              ...(final.gasPriceWei !== undefined ? { gasPriceWei: final.gasPriceWei } : {}),
             });
       const consumedUsdc =
         fee.weiTotal === undefined
           ? null
           : gasUsdc(new Prisma.Decimal(fee.weiTotal.toString()), runEthUsd);
 
-      await recordAttempt(item.id, retries, 'EXECUTE', {
-        executionId: write.executionId,
-        txHash: final.transactionHash === undefined ? null : hexBytes(final.transactionHash),
-        txLink: final.transactionLink ?? null,
-        khStatus: final.status,
-        // Real total wei (L2 + L1) from the receipt — NOT KeeperHub's
-        // sponsorship-dependent `gasUsedWei` (gaps G-28, G-31).
+      await persistObservation(current.id, observation, {
         gasUsedWei: fee.weiTotal === undefined ? null : new Prisma.Decimal(fee.weiTotal.toString()),
         gasUsedUsdc: consumedUsdc,
         sponsored,
       });
 
-      if (final.status === 'completed' && final.transactionHash !== undefined) {
+      if (observation.outcome === 'landed') {
         await transitionItem({
           runId,
           itemIdx,
-          expect: ['SUBMITTED'],
+          expect: ['SUBMITTED', 'COMMITTED', 'RETRYING'],
           to: 'LANDED',
           type: 'ITEM_LANDED',
           payload: {
-            txHash: final.transactionHash,
+            txHash: observation.txHash,
             txLink: final.transactionLink ?? null,
             feeWeiTotal: fee.weiTotal === undefined ? null : fee.weiTotal.toString(),
             feeFromReceipt: fee.fromReceipt,
@@ -1285,49 +1407,31 @@ export async function executeItem(
         return {
           idx: itemIdx,
           landed: true,
-          txHash: final.transactionHash,
+          txHash: observation.txHash,
           ...(fee.weiTotal === undefined ? {} : { feeWeiTotal: fee.weiTotal }),
           feeFromReceipt: fee.fromReceipt,
           l1FeeIncluded: fee.l1FeeIncluded,
           sponsored,
-          ...(detail.gasUsedUnits === undefined ? {} : { gasUsedUnits: detail.gasUsedUnits }),
-          ...(detail.gasPriceWei === undefined ? {} : { gasPriceWei: detail.gasPriceWei }),
-          retries,
+          ...(final.gasUsedUnits === undefined ? {} : { gasUsedUnits: final.gasUsedUnits }),
+          ...(final.gasPriceWei === undefined ? {} : { gasPriceWei: final.gasPriceWei }),
+          retries: attemptNo,
         };
       }
 
-      // completed-without-hash, or failed. Not LANDED — never claim otherwise.
-      await transitionItem({
-        runId,
-        itemIdx,
-        expect: ['SUBMITTED'],
-        to: 'FAILED',
-        type: 'ITEM_FAILED',
-        payload: { reason: `status ${final.status}, hash ${final.transactionHash ?? 'null'}` },
-      });
-      return {
-        idx: itemIdx,
-        landed: false,
-        feeFromReceipt: false,
-        l1FeeIncluded: false,
-        sponsored,
-        retries,
-      };
-    } catch (e) {
-      // RETRYING only on a transient code, capped. A config-revert never retries.
-      if (isTransient(e) && retries < MAX_ONCHAIN_RETRIES) {
-        retries += 1;
+      if (observation.outcome === 'retry' && attemptNo < MAX_ONCHAIN_RETRIES) {
         await transitionItem({
           runId,
           itemIdx,
           expect: ['SUBMITTED', 'COMMITTED'],
           to: 'RETRYING',
           type: 'ITEM_RETRY',
-          payload: { attempt: retries, code: (e as KhError).code ?? null, observed: true },
+          payload: { attempt: attemptNo + 1, code: observation.code, observed: true },
         });
+        attemptNo += 1;
+        attempt = undefined;
         continue;
       }
-      const msg = e instanceof Error ? e.message : String(e);
+
       await transitionItem({
         runId,
         itemIdx,
@@ -1335,21 +1439,104 @@ export async function executeItem(
         to: 'FAILED',
         type: 'ITEM_FAILED',
         payload: {
-          reason: msg,
-          classification: e instanceof KhError ? e.classification : 'unknown',
-          retried: retries,
+          reason:
+            observation.outcome === 'retry' ? 'transient retry cap reached' : observation.reason,
+          code: observation.outcome === 'retry' ? observation.code : null,
         },
       });
-      return {
-        idx: itemIdx,
-        landed: false,
-        feeFromReceipt: false,
-        l1FeeIncluded: false,
-        sponsored: null,
-        retries,
-      };
+      return failedOutcome(itemIdx, attemptNo, sponsored);
+    } catch (error) {
+      if (
+        error instanceof KhError &&
+        error.classification === 'transient' &&
+        error.code !== undefined
+      ) {
+        await persistSubmissionError(durable.id, {
+          status: 'failed',
+          code: error.code,
+          reason: error.message,
+        });
+        if (attemptNo < MAX_ONCHAIN_RETRIES) {
+          await transitionItem({
+            runId,
+            itemIdx,
+            expect: ['SUBMITTED', 'COMMITTED', 'RETRYING'],
+            to: 'RETRYING',
+            type: 'ITEM_RETRY',
+            payload: { attempt: attemptNo + 1, code: error.code, observed: true },
+          });
+          attemptNo += 1;
+          attempt = undefined;
+          continue;
+        }
+        await failSubmission(runId, itemIdx, durable, error, [
+          'SUBMITTED',
+          'COMMITTED',
+          'RETRYING',
+        ]);
+        return failedOutcome(itemIdx, attemptNo);
+      }
+      if (isUncertainSubmission(error)) throw error;
+      await failSubmission(runId, itemIdx, durable, error, ['SUBMITTED', 'COMMITTED', 'RETRYING']);
+      return failedOutcome(itemIdx, attemptNo);
     }
   }
+}
+
+function failedOutcome(
+  idx: number,
+  retries: number,
+  sponsored: boolean | null = null,
+): ExecuteOutcome {
+  return {
+    idx,
+    landed: false,
+    feeFromReceipt: false,
+    l1FeeIncluded: false,
+    sponsored,
+    retries,
+  };
+}
+
+/**
+ * A transient submission error is ambiguous: KeeperHub may have accepted it.
+ * Do not advance the attempt number. Let BullMQ retry the same persisted row
+ * and therefore the same idempotency key.
+ */
+function isUncertainSubmission(error: unknown): boolean {
+  // A non-KeeperHub error may have happened after the POST was accepted (for
+  // example while persisting its execution id). Leave the durable attempt in
+  // place and let the queue retry it; marking it FAILED could invite a second
+  // broadcast on a later manual recovery.
+  return !(error instanceof KhError) || error.classification === 'transient';
+}
+
+async function failSubmission(
+  runId: string,
+  itemIdx: number,
+  attempt: PersistedAttempt,
+  error: unknown,
+  expect: readonly ItemState[],
+): Promise<void> {
+  const message = error instanceof Error ? error.message : String(error);
+  const kh = error instanceof KhError ? error : undefined;
+  await persistSubmissionError(attempt.id, {
+    status: kh?.httpStatus === 409 ? 'idempotency_conflict' : 'submission_failed',
+    ...(kh?.code === undefined ? {} : { code: kh.code }),
+    reason: message,
+  });
+  await transitionItem({
+    runId,
+    itemIdx,
+    expect,
+    to: 'FAILED',
+    type: 'ITEM_FAILED',
+    payload: {
+      reason: message,
+      classification: kh?.classification ?? 'unknown',
+      idempotencyConflict: kh?.httpStatus === 409,
+    },
+  });
 }
 
 /**
@@ -1403,7 +1590,10 @@ export async function phaseSeal(
   runIdOnchain: string,
   budget: BudgetState,
 ): Promise<{ status: RunStatus; txHash?: string }> {
-  await setRunStatus(runId, 'SEALING', 'RUN_SEALED', { phase: 'sealing' });
+  const run = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
+  if (run.status !== 'SEALING') {
+    await setRunStatus(runId, 'SEALING', 'RUN_SEALED', { phase: 'sealing' });
+  }
 
   const items = await prisma.item.findMany({ where: { runId } });
   const unfinished = items

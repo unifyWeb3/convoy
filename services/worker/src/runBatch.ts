@@ -82,7 +82,7 @@ export async function runBatch(
   const fanout = options.fanout ?? EXECUTE_FANOUT;
   const runIdOnchain = `0x${randomBytes(32).toString('hex')}`;
 
-  const runRow = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
+  let runRow = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
   let budget: BudgetState = {
     budgetUsdc: new Prisma.Decimal(runRow.budgetUsdc),
     spentGasUsdc: new Prisma.Decimal(runRow.spentGasUsdc),
@@ -90,25 +90,58 @@ export async function runBatch(
   };
   const runEthUsd = new Prisma.Decimal(runRow.runEthUsd);
 
-  const openTx = await phaseOpen(deps, runId, runIdOnchain);
-  await phasePlan(runId);
+  const openTx = await phaseOpen(
+    deps,
+    runId,
+    runRow.runIdOnchain === null
+      ? runIdOnchain
+      : `0x${Buffer.from(runRow.runIdOnchain).toString('hex')}`,
+  );
+  runRow = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
+  const effectiveRunIdOnchain =
+    runRow.runIdOnchain === null
+      ? runIdOnchain
+      : `0x${Buffer.from(runRow.runIdOnchain).toString('hex')}`;
+  if (runRow.status === 'PLANNING') await phasePlan(runId);
 
   // CRITIQUING — every non-deferred item, zero gas. Simulate, then the Critic,
   // with at most one re-plan cycle (CVY-011).
-  const critique = await phaseCritique(deps, runId, budget);
-  const vetoed = critique.vetoed.map((v) => ({ idx: v.idx, reason: v.reason }));
-  const ready = [...critique.ready];
+  const critique =
+    runRow.status === 'CRITIQUING'
+      ? await phaseCritique(deps, runId, budget)
+      : {
+          ready: [] as number[],
+          vetoed: [],
+          failedIdx: [],
+          replanCycles: 0,
+          notes: [] as string[],
+        };
+  const existingItems = await prisma.item.findMany({ where: { runId }, orderBy: { idx: 'asc' } });
+  const vetoed = existingItems
+    .filter((i) => i.state === 'VETOED')
+    .map((i) => ({ idx: i.idx, reason: i.vetoReason ?? 'vetoed' }));
+  const ready = [
+    ...new Set([
+      ...critique.ready,
+      ...existingItems
+        .filter((i) => ['SIMULATED', 'COMMITTED', 'SUBMITTED', 'RETRYING'].includes(i.state))
+        .map((i) => i.idx),
+    ]),
+  ];
   for (const note of critique.notes) log(`  critique: ${note}`);
 
-  await setRunStatus(runId, 'EXECUTING', 'PLAN_READY', {
-    ready,
-    vetoed: vetoed.map((v) => v.idx),
-    failed: critique.failedIdx,
-    replanCycles: critique.replanCycles,
-    notes: critique.notes,
-    criticConsulted:
-      critique.vetoed.some((v) => v.criticConsulted === true) || deps.critic !== undefined,
-  });
+  runRow = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
+  if (runRow.status === 'CRITIQUING') {
+    await setRunStatus(runId, 'EXECUTING', 'PLAN_READY', {
+      ready,
+      vetoed: vetoed.map((v) => v.idx),
+      failed: critique.failedIdx,
+      replanCycles: critique.replanCycles,
+      notes: critique.notes,
+      criticConsulted:
+        critique.vetoed.some((v) => v.criticConsulted === true) || deps.critic !== undefined,
+    });
+  }
 
   const executed: ExecuteOutcome[] = [];
   let debited = new Prisma.Decimal(0);
@@ -117,7 +150,7 @@ export async function runBatch(
   while (wave.length > 0) {
     log(`  EXECUTE wave of ${wave.length} at fanout=${fanout}`);
     const outcomes = await dispatchConcurrently(wave, fanout, async (idx) =>
-      executeItem(deps, runId, idx, runIdOnchain, runEthUsd),
+      executeItem(deps, runId, idx, effectiveRunIdOnchain, runEthUsd),
     );
     executed.push(...outcomes);
 
@@ -157,11 +190,35 @@ export async function runBatch(
     if (wave.length > 0) log(`  deferral gate released ${wave.join(', ')}`);
   }
 
-  const sealed = await phaseSeal(deps, runId, runIdOnchain, budget);
+  runRow = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
+  if (runRow.status === 'SEALED_OK' || runRow.status === 'SEALED_PARTIAL') {
+    const sealedEvent = await prisma.event.findFirst({
+      where: { runId, type: runRow.status === 'SEALED_OK' ? 'RUN_SEALED' : 'RUN_SEALED_PARTIAL' },
+      orderBy: { id: 'desc' },
+    });
+    const payload = sealedEvent?.payload;
+    const tx =
+      payload !== null && typeof payload === 'object'
+        ? (payload as { txHash?: unknown }).txHash
+        : undefined;
+    return {
+      runId,
+      runIdOnchain: effectiveRunIdOnchain,
+      openTx,
+      ...(typeof tx === 'string' ? { sealTx: tx } : {}),
+      status: runRow.status,
+      executed,
+      vetoed,
+      budget,
+      walletDebitedUsdc: debited,
+      unknownPayerCount: unknownPayer,
+    };
+  }
+  const sealed = await phaseSeal(deps, runId, effectiveRunIdOnchain, budget);
 
   return {
     runId,
-    runIdOnchain,
+    runIdOnchain: effectiveRunIdOnchain,
     openTx,
     sealTx: sealed.txHash,
     status: sealed.status,

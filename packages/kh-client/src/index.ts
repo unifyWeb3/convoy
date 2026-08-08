@@ -53,10 +53,18 @@ export {
   classifyTransportError,
   extractMessage,
   parseRetryAfter,
+  transientRunErrorCode,
 } from './errors.js';
 export type { ClassifyInput, KhErrorClass, KhErrorInit } from './errors.js';
 
-export { IDEMPOTENCY_HEADER, buildIdempotencyKey, parseIdempotencyKey } from './idempotency.js';
+export {
+  IDEMPOTENCY_HEADER,
+  buildIdempotencyKey,
+  buildPhaseIdempotencyKey,
+  foldRunIdForPhase,
+  parseIdempotencyKey,
+} from './idempotency.js';
+export type { IdempotencyPhase } from './idempotency.js';
 
 export {
   SUPPORTED_CHAIN_IDS,

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   IDEMPOTENCY_HEADER,
   buildIdempotencyKey,
+  buildPhaseIdempotencyKey,
   parseIdempotencyKey,
 } from '../src/idempotency.js';
 
@@ -37,6 +38,17 @@ describe('buildIdempotencyKey', () => {
     expect(() => buildIdempotencyKey({ runId: 'r', idx: 1.5, attempt: 0 })).toThrow(/idx/);
     expect(() => buildIdempotencyKey({ runId: 'r', idx: 0, attempt: -1 })).toThrow(/attempt/);
     expect(() => buildIdempotencyKey({ runId: 'r', idx: 0, attempt: 1.5 })).toThrow(/attempt/);
+  });
+});
+
+describe('phase-folded idempotency keys', () => {
+  it('keeps the three-part shape and separates every write phase', () => {
+    const keys = (['o', 'c', 'x', 's'] as const).map((phase) =>
+      buildPhaseIdempotencyKey('run-12345678', phase, 0, 0),
+    );
+    expect(keys).toEqual(['run-1234-o:0:0', 'run-1234-c:0:0', 'run-1234-x:0:0', 'run-1234-s:0:0']);
+    expect(keys.every((key) => key.split(':').length === 3)).toBe(true);
+    expect(new Set(keys).size).toBe(4);
   });
 });
 
