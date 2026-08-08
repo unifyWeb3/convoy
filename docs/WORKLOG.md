@@ -903,3 +903,40 @@ The repository's `refresh.replay.spec.ts` passed, and separate desktop/tablet/mo
 verified Timeline and DAG rendering on both the seeded replay run and the real CVY-013 Base Sepolia
 run. The CVY-013 milestone report is [`docs/milestones/CVY-013.md`](milestones/CVY-013.md). Next is
 CVY-GATE2, which was not begun.
+
+## 2026-08-07 — CVY-GATE2: full 12-item checkpoint
+
+Full report: [`docs/milestones/CVY-GATE2.md`](milestones/CVY-GATE2.md).
+
+GATE 2 **PASSED WITH OPERATIONAL CONSTRAINTS** on Base Sepolia. The first real run used the default
+fanout of four and sealed partial after two KeeperHub wallet transactions reverted with the real
+`InvalidNonce()` selector. Convoy set no nonce and staged no failure. A fresh 12-item run using the
+existing serial-fanout option sealed `SEALED_OK`: ten items landed, items 7 and 8 were genuinely
+vetoed by HTTP-400 simulations (`MarketAlreadyEnabled()` and `RootAlreadySet()`), and seven declared
+dependencies released in three waves only after their prerequisites landed. All dependency-bearing
+submissions recorded a real met registry condition.
+
+The successful run had a 120 USDC notional budget, consumed 0.0137003181313466 USDC of real receipt
+gas at the frozen price, recorded zero payment spend and zero wallet debit, and sealed with ten
+registry commitments. The manifest is canonical SHA-256
+`0xe1294cefc61b9141279499c5bb2ab84af23c751c61b790d3380eb400296dc8ca`, but is honestly amber:
+KeeperHub and the ledger agree while the configured RPC rejected the full-range registry log query
+under its ten-block free-tier limit. Direct post-run storage reads separately confirmed the seal,
+commit count, ten commitments and seven enabled markets.
+
+Browser evidence is split honestly. One live attempt captured the 12-node/seven-edge DAG, a dashed
+deferred edge and a successful mid-run refresh, then failed on an incorrect terminal selector. The
+corrected final-only DAG/manifest run passed 1/1 in 34.4 seconds. A single browser test is therefore
+not claimed to have passed continuously from run start through seal. The raw manifest and original
+manifest screenshot are not distributable because the provider error embeds the configured RPC
+credential (G-42); future screenshots mask that column.
+
+The card's `POST /api/runs` route remains 501 and its named 12-item fixture is absent, so this gate
+used a dedicated direct `runBatch` harness. The real plan/critique/execute/seal phases ran, but the
+plan was the deterministic declared-edge fallback and no LLM Critic was wired; the two structural
+simulate vetoes were independently decisive. G-40 through G-43 record the fanout, RPC, credential
+and entrypoint friction. G-32 also recurred: the shared database process produced a first-query
+timeout and a transient first-create connection failure. After a clean restart on an isolated port,
+DB passed 35/35 and worker passed 95/95; the gap stays open because the harness remains
+timing-sensitive. No cut is applied and no post-gate milestone is begun; the next critical-path work
+is CVY-015.
