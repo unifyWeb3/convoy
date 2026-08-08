@@ -58,6 +58,16 @@ describe('DagView render model', () => {
     expect(landed?.style).toMatchObject({ background: '#ecfdf5', border: '#10b981' });
   });
 
+  it('keeps a budget-exhausted node visibly SKIPPED', () => {
+    const skippedEvent: TimelineEvent = {
+      ...event('1', 0, 'ITEM_FAILED'),
+      payload: { reason: 'budget exhausted', skipped: true },
+    };
+    const graph = buildDagGraph([item(0, [], 'SKIPPED')], [skippedEvent]);
+    expect(graph.nodes[0]?.data['label']).toContain('SKIPPED');
+    expect(graph.nodes[0]?.style).toMatchObject({ background: '#fffbeb', border: '#f59e0b' });
+  });
+
   it('dashes and animates every still-blocked deferred edge', () => {
     const graph = buildDagGraph([item(0), item(1), item(2, [0, 1], 'DEFERRED')], []);
     expect(graph.edges).toHaveLength(2);

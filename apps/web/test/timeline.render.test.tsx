@@ -101,6 +101,18 @@ describe('Timeline', () => {
     expect(html).toContain('border-sky-200 bg-sky-50 text-sky-800">SUBMITTED</span>');
   });
 
+  it('preserves budget-exhausted items as SKIPPED instead of relabelling them FAILED', () => {
+    const skipped = item(0, { state: 'SKIPPED' });
+    const events = [event('10', 0, 'ITEM_FAILED', { reason: 'budget exhausted', skipped: true })];
+
+    expect(deriveItemState(skipped, events)).toBe('SKIPPED');
+    const html = renderToStaticMarkup(
+      <Timeline runId="run-1" initial={snapshot([skipped], events)} />,
+    );
+    expect(html).toContain('>SKIPPED</span>');
+    expect(html).toContain('Skipped after the run budget was exhausted');
+  });
+
   it('stacks multiple observed retries visibly', () => {
     const events = [
       event('2', 0, 'ITEM_RETRY', { attempt: 1, code: 'N-0001' }),
@@ -153,6 +165,23 @@ describe('Timeline', () => {
     expect(html).toContain('href="https://sepolia.basescan.org/tx/0xexecute"');
     expect(html).toContain('RETRY #1');
     expect(html).toContain('code: N-0001');
+  });
+
+  it('does not claim Critic approval before simulation evidence exists', () => {
+    const beforeSimulation = renderToStaticMarkup(
+      <AuditDrawer item={item(0)} events={[]} onClose={() => undefined} />,
+    );
+    expect(beforeSimulation).toContain('not recorded');
+    expect(beforeSimulation).not.toContain('APPROVED</dd>');
+
+    const afterSimulation = renderToStaticMarkup(
+      <AuditDrawer
+        item={item(0)}
+        events={[event('1', 0, 'ITEM_SIMULATED', { wouldRevert: false })]}
+        onClose={() => undefined}
+      />,
+    );
+    expect(afterSimulation).toContain('APPROVED</dd>');
   });
 
   it('treats pre-seal RUN_SEALED as SEALING until the final event', () => {

@@ -22,6 +22,7 @@ const STATE_COLOURS: Readonly<
   LANDED: { background: '#ecfdf5', border: '#10b981', color: '#065f46' },
   VETOED: { background: '#f4f4f5', border: '#a1a1aa', color: '#52525b' },
   FAILED: { background: '#fef2f2', border: '#ef4444', color: '#991b1b' },
+  SKIPPED: { background: '#fffbeb', border: '#f59e0b', color: '#92400e' },
   RETRYING: { background: '#fff7ed', border: '#f97316', color: '#9a3412' },
   SUBMITTED: { background: '#eff6ff', border: '#3b82f6', color: '#1e40af' },
   COMMITTED: { background: '#eef2ff', border: '#6366f1', color: '#3730a3' },
@@ -111,20 +112,38 @@ export function buildDagGraph(
 
 export function DagView({ runId, live }: { runId: string; live: TimelineLiveState }) {
   const graph = useMemo(() => buildDagGraph(live.items, live.events), [live.events, live.items]);
+  const waitingEdges = graph.edges.filter((edge) => edge.animated).length;
   return (
-    <section aria-labelledby="dag-heading" className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-zinc-200 pb-4">
+    <section aria-labelledby="dag-heading" className="space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-[#D9D9D3] pb-5">
         <div>
-          <p className="font-mono text-xs uppercase tracking-widest text-zinc-500">Run {runId}</p>
-          <h1 id="dag-heading" className="text-2xl font-semibold text-zinc-950">
+          <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#7A7A7A]">
+            Supporting execution evidence
+          </p>
+          <h2
+            id="dag-heading"
+            className="font-convoy-display mt-2 text-3xl text-[#1A1816] sm:text-4xl"
+          >
             Live dependency DAG
-          </h1>
+          </h2>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#7A7A7A]">
+            The action list is the primary release story. This graph proves the declared ordering
+            and shows which prerequisite edges are still holding work.
+          </p>
         </div>
-        <span className="border border-zinc-300 px-2 py-1 text-xs font-semibold text-zinc-700">
-          {live.runStatus}
-        </span>
+        <div className="flex gap-2">
+          <span className="border border-[#CFCFC8] bg-white px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-wider text-[#4F4B47]">
+            {graph.edges.length} dependencies
+          </span>
+          <span className="border border-[#CFCFC8] bg-white px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-wider text-[#4F4B47]">
+            {waitingEdges} waiting
+          </span>
+        </div>
       </div>
-      <div className="h-[620px] border border-zinc-200 bg-white" data-testid="dag-canvas">
+      <div
+        className="convoy-dag h-[480px] border border-[#2B2825] bg-[#2B2825] sm:h-[620px]"
+        data-testid="dag-canvas"
+      >
         <ReactFlow
           nodes={[...graph.nodes]}
           edges={[...graph.edges]}
@@ -136,13 +155,14 @@ export function DagView({ runId, live }: { runId: string; live: TimelineLiveStat
           nodesConnectable={false}
           aria-label="Run dependency graph"
         >
-          <Background gap={24} size={1} />
+          <Background color="#5B5651" gap={24} size={1} />
           <Controls showInteractive={false} />
         </ReactFlow>
       </div>
-      <p className="text-xs text-zinc-500">
-        Dashed animated edges are waiting for their prerequisite to land.
-      </p>
+      <div className="flex flex-col gap-2 font-mono text-[9px] uppercase tracking-[0.12em] text-[#7A7A7A] sm:flex-row sm:items-center sm:justify-between">
+        <span>Dashed animated edge = waiting for prerequisite</span>
+        <span className="break-all">Run {runId}</span>
+      </div>
     </section>
   );
 }
