@@ -36,17 +36,49 @@ vi.mock('@convoy/db', async (importOriginal) => {
         return data;
       }),
     },
+    attempt: {
+      findFirst: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+        return (
+          ledger.attempts.find(
+            (attempt) =>
+              attempt['itemId'] === where['itemId'] &&
+              attempt['attemptNo'] === where['attemptNo'] &&
+              attempt['kind'] === where['kind'],
+          ) ?? null
+        );
+      }),
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        const row = {
+          id: `attempt-${ledger.attempts.length + 1}`,
+          executionId: null,
+          txHash: null,
+          txLink: null,
+          errorCode: null,
+          revertReason: null,
+          gasUsedWei: null,
+          gasUsedUsdc: null,
+          sponsored: null,
+          createdAt: new Date(),
+          ...data,
+        };
+        ledger.attempts.push(row);
+        return row;
+      }),
+      update: vi.fn(
+        async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+          const row = ledger.attempts.find((attempt) => attempt['id'] === where.id);
+          if (row === undefined) throw new Error('attempt missing');
+          Object.assign(row, data);
+          return row;
+        },
+      ),
+    },
   };
   return {
     ...actual,
     unsafeRawClient: {
       item: { findUniqueOrThrow: vi.fn(async () => ledger.item) },
-      attempt: {
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-          ledger.attempts.push(data);
-          return data;
-        }),
-      },
+      attempt: tx.attempt,
       $transaction: vi.fn(async (work: (client: typeof tx) => Promise<unknown>) => await work(tx)),
     },
   };

@@ -76,59 +76,37 @@ export async function getOrCreateAttempt(
   attemptNo: number,
   kind: RecoverableAttemptKind,
 ): Promise<PersistedAttempt> {
-  return await prisma.$transaction(async (tx) => {
-    const attemptDelegate = (
-      tx as unknown as { attempt?: { findFirst?: unknown; create: unknown } }
-    ).attempt;
-    if (attemptDelegate === undefined) {
-      const created = await prisma.attempt.create({
-        data: { itemId, attemptNo, kind, khStatus: 'prepared' },
-      });
-      return asPersisted({
-        ...created,
-        executionId: created.executionId ?? null,
-        txHash: created.txHash ?? null,
-        txLink: created.txLink ?? null,
-        khStatus: created.khStatus ?? 'prepared',
-        errorCode: created.errorCode ?? null,
-        revertReason: created.revertReason ?? null,
-        gasUsedWei: created.gasUsedWei ?? null,
-        gasUsedUsdc: created.gasUsedUsdc ?? null,
-        sponsored: created.sponsored ?? null,
-      });
+  for (let transactionAttempt = 0; transactionAttempt < 3; transactionAttempt += 1) {
+    try {
+      return await prisma.$transaction(
+        async (tx) => {
+          const existing = await tx.attempt.findFirst({
+            where: { itemId, attemptNo, kind },
+            orderBy: { createdAt: 'asc' },
+          });
+          if (existing !== null) return asPersisted(existing);
+          return asPersisted(
+            await tx.attempt.create({
+              data: { itemId, attemptNo, kind, khStatus: 'prepared' },
+            }),
+          );
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+    } catch (error) {
+      // PostgreSQL aborts one concurrent serializable transaction. Retrying it
+      // re-reads the winner's row instead of preparing a second durable key.
+      if (transactionAttempt < 2 && isSerializationFailure(error)) continue;
+      throw error;
     }
-    const findFirst = (
-      attemptDelegate as unknown as {
-        findFirst?: (args: unknown) => Promise<ReturnType<typeof asPersisted> | null>;
-      }
-    ).findFirst;
-    if (findFirst === undefined) {
-      const created = await tx.attempt.create({
-        data: { itemId, attemptNo, kind, khStatus: 'prepared' },
-      });
-      return asPersisted({
-        ...created,
-        executionId: created.executionId ?? null,
-        txHash: created.txHash ?? null,
-        txLink: created.txLink ?? null,
-        khStatus: created.khStatus ?? 'prepared',
-        errorCode: created.errorCode ?? null,
-        revertReason: created.revertReason ?? null,
-        gasUsedWei: created.gasUsedWei ?? null,
-        gasUsedUsdc: created.gasUsedUsdc ?? null,
-        sponsored: created.sponsored ?? null,
-      });
-    }
-    const existing = await findFirst({
-      where: { itemId, attemptNo, kind },
-      orderBy: { createdAt: 'asc' },
-    });
-    if (existing !== null) return asPersisted(existing);
-    const created = await tx.attempt.create({
-      data: { itemId, attemptNo, kind, khStatus: 'prepared' },
-    });
-    return asPersisted(created);
-  });
+  }
+  throw new Error('unreachable attempt preparation state');
+}
+
+function isSerializationFailure(error: unknown): boolean {
+  return (
+    error !== null && typeof error === 'object' && (error as { code?: unknown }).code === 'P2034'
+  );
 }
 
 /** Store the external identity before any status polling. */
@@ -248,8 +226,12 @@ export async function pollPersistedExecution(
   const write: WriteResult = {
     executionId: attempt.executionId,
     status: attempt.khStatus ?? 'pending',
-    ...(attempt.txHash === null ? {} : { transactionHash: bytesToHex(attempt.txHash) }),
-    ...(attempt.txLink === null ? {} : { transactionLink: attempt.txLink }),
+    ...(attempt.txHash === null || attempt.txHash === undefined
+      ? {}
+      : { transactionHash: bytesToHex(attempt.txHash) }),
+    ...(attempt.txLink === null || attempt.txLink === undefined
+      ? {}
+      : { transactionLink: attempt.txLink }),
     terminal:
       attempt.txHash !== null &&
       (attempt.khStatus === 'completed' || attempt.khStatus === 'failed'),

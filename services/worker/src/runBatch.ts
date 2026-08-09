@@ -102,7 +102,13 @@ export async function runBatch(
     runRow.runIdOnchain === null
       ? runIdOnchain
       : `0x${Buffer.from(runRow.runIdOnchain).toString('hex')}`;
-  if (runRow.status === 'PLANNING') await phasePlan(runId);
+  if (runRow.status === 'PLANNING') {
+    await phasePlan(runId);
+    // phasePlan advances the persisted run to CRITIQUING. Refresh the row
+    // before selecting the next phase; retaining the pre-plan PLANNING value
+    // would skip simulation/Critic on every fresh queue-started run.
+    runRow = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
+  }
 
   // CRITIQUING — every non-deferred item, zero gas. Simulate, then the Critic,
   // with at most one re-plan cycle (CVY-011).

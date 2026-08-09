@@ -956,7 +956,43 @@ The four BullMQ handlers now delegate to the one resumable `runBatch`/orchestrat
 creation, history, wallet, analytics, or another execution rail. Phase-folded idempotency helpers
 are centralized in `@convoy/kh-client` and preserve the frozen three-part key shape.
 
-Deterministic tests: kh-client 131, worker 103, web 84. DB passed 35/35 on a clean isolated rerun;
+Initial deterministic tests: kh-client 131, worker 103, web 84. DB passed 35/35 on a clean isolated rerun;
 the initial DB attempt timed out on the first schema query (G-32). The live Base Sepolia kill/restart
 acceptance was not run because this worker process lacked usable KeeperHub/Base Sepolia runtime
 configuration. No live identifiers or duplicate-hash result are claimed.
+
+### 2026-08-09 review correction
+
+Review found that the committed fresh queue path retained the pre-plan `PLANNING` row and therefore
+skipped the Critic, and that the route-local BullMQ queue omitted the shared attempts/backoff policy.
+The correction reloads the run after planning and pins the full fresh lifecycle with a regression
+test. Concurrent recovery was also hardened: the first persisted onchain run ID wins OPEN races, and
+serializable attempt preparation makes concurrent COMMIT/EXECUTE recovery converge on one durable
+row without changing the frozen ledger schema.
+
+Fresh isolated verification applied both frozen migrations, seeded the frozen fixtures, then passed
+DB 35/35 and worker 105/105. kh-client remains 131/131 and web remains 84/84. These are automated
+and deterministic results only: the task card's real Base Sepolia `SIGKILL → restart → identical
+executionId/hash` acceptance and live duplicate-hash SQL proof remain unperformed, so CVY-015 stays
+TODO and the overall percentage stays 74%.
+
+### 2026-08-09 live acceptance
+
+CVY-015 passed its real Base Sepolia kill/restart acceptance. Environment preflight passed 13/13,
+including Postgres, Redis, KeeperHub auth/wallet simulation, RPC chain pin `84532`, deployed registry
+bytecode and current migrations. The org wallet held approximately 0.099999 Base Sepolia ETH.
+
+Fresh run `e0dd13db-1b60-484e-925c-9ad327463c9f` executed one valid `enableMarket(78)` item at
+`CONVOY_EXECUTE_FANOUT=1`. The production worker was sent a real `SIGKILL` after EXECUTE ID
+`8bwrgf7yzrqb6b3k24y9w` was durably stored with no transaction hash. After restart, recovery polled
+that same ID rather than creating a second attempt and recorded transaction
+`0x280053932c3d20d5afdbcffc40a3319e7cf7ac33699c686b446ee85056c284cb`. KeeperHub's status re-read
+returned the same ID/hash, the receipt succeeded, `marketEnabled(78)` became true, and the run sealed
+`SEALED_OK`. The run contains one COMMIT attempt and one EXECUTE attempt.
+
+The task card's literal duplicate query found one empty-hash group with count three. Audit showed
+these are historical test-double COMMIT rows whose `tx_hash` is a zero-length `bytea`, not valid
+transaction hashes. The valid-hash proof (`octet_length(tx_hash)=32`) returned zero duplicate rows
+across the database, and the acceptance-run-scoped query also returned zero rows. Historical rows
+were not rewritten to make the evidence look cleaner. CVY-015 is DONE; overall completion advances
+to 79%, and CVY-016 is next.

@@ -173,7 +173,8 @@ describe('CVY-015 reconcile-before-act', () => {
       fetchImpl: async () =>
         new Response(JSON.stringify({ error: 'idempotency_conflict' }), { status: 409 }),
     });
-    const { writeContractCall, KhError } = await import('@convoy/kh-client');
+    const { writeContractCall } = await import('@convoy/kh-client');
+    type KhErrorShape = { classification: string; httpStatus: number };
     await expect(
       writeContractCall(
         kh,
@@ -184,7 +185,7 @@ describe('CVY-015 reconcile-before-act', () => {
         },
         { runId: 'run-x', idx: 2, attempt: 0 },
       ),
-    ).rejects.toMatchObject<Partial<InstanceType<typeof KhError>>>({
+    ).rejects.toMatchObject<Partial<KhErrorShape>>({
       classification: 'item-failed',
       httpStatus: 409,
     });

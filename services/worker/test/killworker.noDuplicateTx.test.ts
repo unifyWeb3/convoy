@@ -1,6 +1,34 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { KhClient } from '@convoy/kh-client';
 
+interface AttemptRow {
+  id: string;
+  itemId: string;
+  attemptNo: number;
+  kind: string;
+  executionId: string | null;
+  txHash: Buffer | null;
+  txLink: string | null;
+  khStatus: string | null;
+  errorCode: string | null;
+  revertReason: string | null;
+  gasUsedWei: null;
+  gasUsedUsdc: null;
+  sponsored: null;
+  createdAt: Date;
+}
+
+interface EventRow {
+  type: string;
+  [key: string]: unknown;
+}
+
+interface AttemptCreateData {
+  attemptNo: number;
+  kind: string;
+  khStatus?: string;
+}
+
 const ledger = vi.hoisted(() => ({
   item: {
     id: 'item-kill',
@@ -16,8 +44,8 @@ const ledger = vi.hoisted(() => ({
     gasBudgetUsdc: null,
     vetoReason: null,
   },
-  attempts: [] as Record<string, any>[],
-  events: [] as Record<string, any>[],
+  attempts: [] as AttemptRow[],
+  events: [] as EventRow[],
   crashOnPoll: true,
   commitBroadcasts: 0,
   targetBroadcasts: 0,
@@ -26,7 +54,7 @@ const ledger = vi.hoisted(() => ({
 
 vi.mock('@convoy/db', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@convoy/db')>();
-  const findAttempt = async ({ where, orderBy }: any) => {
+  const findAttempt = async ({ where }: { where: { itemId: string; kind: string } }) => {
     const rows = ledger.attempts.filter((a) => a.itemId === where.itemId && a.kind === where.kind);
     if (rows.length === 0) return null;
     return [...rows].sort((a, b) => b.attemptNo - a.attemptNo)[0];
@@ -34,18 +62,20 @@ vi.mock('@convoy/db', async (importOriginal) => {
   const tx = {
     item: {
       findUnique: vi.fn(async () => ledger.item),
-      update: vi.fn(async ({ data }: any) => Object.assign(ledger.item, data)),
+      update: vi.fn(async ({ data }: { data: Record<string, unknown> }) =>
+        Object.assign(ledger.item, data),
+      ),
     },
     event: {
-      create: vi.fn(async ({ data }: any) => {
+      create: vi.fn(async ({ data }: { data: EventRow }) => {
         ledger.events.push(data);
         return data;
       }),
     },
     attempt: {
       findFirst: vi.fn(findAttempt),
-      create: vi.fn(async ({ data }: any) => {
-        const row = {
+      create: vi.fn(async ({ data }: { data: AttemptCreateData }) => {
+        const row: AttemptRow = {
           id: `attempt-${ledger.attempts.length + 1}`,
           itemId: ledger.item.id,
           attemptNo: data.attemptNo,
@@ -64,12 +94,14 @@ vi.mock('@convoy/db', async (importOriginal) => {
         ledger.attempts.push(row);
         return row;
       }),
-      update: vi.fn(async ({ where, data }: any) => {
-        const row = ledger.attempts.find((a) => a.id === where.id);
-        if (row === undefined) throw new Error('attempt missing');
-        Object.assign(row, data);
-        return row;
-      }),
+      update: vi.fn(
+        async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+          const row = ledger.attempts.find((a) => a.id === where.id);
+          if (row === undefined) throw new Error('attempt missing');
+          Object.assign(row, data);
+          return row;
+        },
+      ),
     },
   };
   return {

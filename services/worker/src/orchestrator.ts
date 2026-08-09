@@ -269,10 +269,20 @@ export async function phaseOpen(
     if (typeof txHash === 'string') return txHash;
   }
   if (existing.runIdOnchain === null) {
-    await prisma.run.update({
-      where: { id: runId },
+    // Two stalled/re-picked lifecycle jobs may reach OPEN concurrently. The
+    // first generated onchain id must win; an unconditional update would let
+    // the second caller overwrite the id used by the first KeeperHub request.
+    const claimed = await prisma.run.updateMany({
+      where: { id: runId, runIdOnchain: null },
       data: { runIdOnchain: hexBytes(runIdOnchain) },
     });
+    if (claimed.count === 0) {
+      const persisted = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
+      if (persisted.runIdOnchain === null) {
+        throw new Error(`run ${runId} lost its onchain id assignment`);
+      }
+      runIdOnchain = bytesToHex(persisted.runIdOnchain);
+    }
   } else {
     runIdOnchain = bytesToHex(existing.runIdOnchain);
   }
