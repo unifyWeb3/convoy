@@ -13,9 +13,7 @@ const nextConfig = {
   experimental: {
     outputFileTracingRoot: path.resolve(appDir, '../..'),
     outputFileTracingIncludes: {
-      '/*': [
-        '../../node_modules/.pnpm/@prisma+client@*/node_modules/.prisma/client/**/*',
-      ],
+      '/*': ['../../node_modules/.pnpm/@prisma+client@*/node_modules/.prisma/client/**/*'],
     },
   },
 };
