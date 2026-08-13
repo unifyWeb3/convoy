@@ -657,7 +657,7 @@ async function executeLive(
   const registry = process.env['CONVOY_REGISTRY_ADDR'];
   if (registry === undefined || registry === '') throw new Error('CONVOY_REGISTRY_ADDR is not set');
   const distributor = distributorAddress(process.env['MOCK_DISTRIBUTOR_ADDR']);
-  const { runBatch, khFromEnv } = await import('../services/worker/dist/runBatch.js');
+  const { runBatch, khFromEnv } = await import('../services/worker/src/runBatch.js');
   const log = (message: string): void => console.log(`[${prepared.mode}] ${message}`);
   const ai = await composeLiveAi(log);
   if (prepared.mode === 'critic' && storedPlan === undefined) {
