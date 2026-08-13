@@ -139,8 +139,10 @@ The preflight must report `planner.source="planner"`, a GenLayer-backed Critic m
 `vercel.json` lives at the repository root per the blueprint's tree, while the project's Root
 Directory is set to `apps/web` in the dashboard. Vercel reads `vercel.json` from the configured Root
 Directory, so **the dashboard settings are authoritative** (decision D-002). Set the dashboard
-Build Command to `pnpm --filter @convoy/web... build`: pnpm selects the web workspace and its
-workspace dependencies, then builds them in topological order before Next.js. The repository-root
+Build Command to
+`pnpm --filter @convoy/db db:generate && pnpm --filter @convoy/web... build`: the first command
+generates the Prisma client without applying a migration, then pnpm selects the web workspace and
+its workspace dependencies and builds them in topological order before Next.js. The repository-root
 `vercel.json` mirrors that command for root-context verification. Deployment is git integration
 only.
 
