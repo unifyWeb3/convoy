@@ -184,9 +184,9 @@ describe('SIGTERM drains in-flight jobs', () => {
   });
 });
 
-describe('concurrency is not 1 (DEC-002)', () => {
-  it('EXECUTE_FANOUT is greater than 1 — serial submission has nothing to serialize', () => {
-    expect(EXECUTE_FANOUT).toBeGreaterThan(1);
+describe('safe execution fanout', () => {
+  it('defaults to one unless an explicit measurement override is configured', () => {
+    expect(EXECUTE_FANOUT).toBe(1);
   });
 
   it('WORKER_CONCURRENCY never falls below EXECUTE_FANOUT', () => {

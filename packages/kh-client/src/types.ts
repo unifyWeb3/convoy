@@ -157,6 +157,8 @@ export interface WriteResult extends ReportedGasFields {
   readonly status: ExecutionStatus | string;
   readonly transactionHash?: string;
   readonly transactionLink?: string;
+  /** KeeperHub's own internal retry count; Convoy observes it only. */
+  readonly retryCount?: number;
   /** True when the POST response is already terminal and no poll is needed. */
   readonly terminal: boolean;
   readonly httpStatus: number;
@@ -169,6 +171,8 @@ export interface StatusResult extends ReportedGasFields {
   readonly status: ExecutionStatus | string;
   readonly transactionHash?: string;
   readonly transactionLink?: string;
+  /** KeeperHub's own internal retry count; Convoy observes it only. */
+  readonly retryCount?: number;
   readonly terminal: boolean;
   /**
    * From the `X-Poll-Interval-Hint` header. **0 means terminal** — stop polling.

@@ -77,7 +77,7 @@ describe('CVY-015 reconcile-before-act', () => {
     expect(classifyExecutionStatus(status).outcome).toBe('failed');
   });
 
-  it('distinguishes transient coded failures from config reverts', async () => {
+  it('treats every terminal status failure as terminal while exposing KeeperHub codes', async () => {
     const { classifyExecutionStatus } = await import('../src/reconcile.js');
     const base = (raw: unknown): StatusResult => ({
       executionId: 'direct_failed',
@@ -88,7 +88,7 @@ describe('CVY-015 reconcile-before-act', () => {
     expect(
       classifyExecutionStatus(base({ status: 'failed', error: 'N-0001 temporary' })),
     ).toMatchObject({
-      outcome: 'retry',
+      outcome: 'failed',
       code: 'N-0001',
     });
     expect(

@@ -1,8 +1,8 @@
 // End-to-end run driver: RECEIVED → SEALED_OK/SEALED_PARTIAL.
 //
-// Phase orchestration is serial. Within EXECUTE, ready items dispatch
-// CONCURRENTLY at EXECUTE_FANOUT (DEC-002) so KeeperHub's nonce manager is what
-// serializes them.
+// Phase orchestration is serial. Within EXECUTE, ready items dispatch at the
+// canonical EXECUTE_FANOUT default of 1; wider fanout is an explicit
+// measurement/rehearsal override and is not current stability evidence.
 
 import { randomBytes } from 'node:crypto';
 
@@ -10,7 +10,7 @@ import { Prisma, unsafeRawClient as prisma } from '@convoy/db';
 import { KhClient } from '@convoy/kh-client';
 
 import { EXECUTE_FANOUT } from './config.js';
-import { applyGas, remaining, type BudgetState, type GasFee } from './budget.js';
+import { isLow, remaining, type BudgetState } from './budget.js';
 import {
   executeItem,
   phaseCritique,
@@ -18,9 +18,11 @@ import {
   phasePlan,
   phaseSeal,
   releaseDeferred,
+  plannerPriority,
   setRunStatus,
   type ExecuteOutcome,
   type OrchestratorDeps,
+  type PlannerPort,
 } from './orchestrator.js';
 
 export interface RunResult {
@@ -42,16 +44,81 @@ export interface RunResult {
   readonly unknownPayerCount: number;
 }
 
-/**
- * Wrap an already-composed total into the meter's fee shape.
- *
- * `composeGasFeeWei` multiplies units by a price; here the multiplication has
- * already happened against the receipt, so the L2/L1 split is not re-derived —
- * only the total is load-bearing for the formula.
- */
-function weiToFee(weiTotal: bigint, l1FeeIncluded: boolean): GasFee {
-  const total = new Prisma.Decimal(weiTotal.toString());
-  return { weiTotal: total, weiL2: total, weiL1: new Prisma.Decimal(0), l1FeeIncluded };
+function budgetFromRun(run: {
+  budgetUsdc: Prisma.Decimal | string;
+  spentGasUsdc: Prisma.Decimal | string;
+  spentPayUsdc: Prisma.Decimal | string;
+}): BudgetState {
+  return {
+    budgetUsdc: new Prisma.Decimal(run.budgetUsdc),
+    spentGasUsdc: new Prisma.Decimal(run.spentGasUsdc),
+    spentPayUsdc: new Prisma.Decimal(run.spentPayUsdc),
+  };
+}
+
+async function loadBudget(runId: string): Promise<BudgetState> {
+  return budgetFromRun(await prisma.run.findUniqueOrThrow({ where: { id: runId } }));
+}
+
+async function persistedWalletEvidence(runId: string): Promise<{
+  readonly walletDebitedUsdc: Prisma.Decimal;
+  readonly unknownPayerCount: number;
+}> {
+  const [attempts, events] = await Promise.all([
+    prisma.attempt.findMany({
+      where: {
+        item: { runId },
+        kind: { in: ['COMMIT', 'EXECUTE'] },
+        executionId: { not: null },
+      },
+      select: { executionId: true, gasUsedUsdc: true, sponsored: true },
+    }),
+    prisma.event.findMany({
+      where: {
+        runId,
+        itemIdx: null,
+        type: { in: ['RUN_OPENED', 'RUN_SEALED', 'RUN_SEALED_PARTIAL', 'ITEM_FAILED'] },
+      },
+      orderBy: { id: 'asc' },
+    }),
+  ]);
+
+  let debited = new Prisma.Decimal(0);
+  let unknown = 0;
+  const seen = new Set<string>();
+  for (const attempt of attempts) {
+    const executionId = attempt.executionId;
+    if (executionId === null || seen.has(`attempt:${executionId}`)) continue;
+    seen.add(`attempt:${executionId}`);
+    if (attempt.sponsored === false && attempt.gasUsedUsdc !== null) {
+      debited = debited.add(attempt.gasUsedUsdc);
+    } else if (attempt.sponsored === null) {
+      unknown += 1;
+    }
+  }
+  for (const event of events) {
+    const value = event.payload;
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) continue;
+    const payload = value as Record<string, unknown>;
+    const phase = payload['phase'];
+    const executionId = payload['executionId'];
+    if (
+      (phase !== 'open' && phase !== 'seal') ||
+      typeof executionId !== 'string' ||
+      seen.has(`run:${phase}:${executionId}`)
+    ) {
+      continue;
+    }
+    seen.add(`run:${phase}:${executionId}`);
+    const sponsored = payload['sponsored'];
+    const gas = payload['gasUsdcConsumed'];
+    if (sponsored === false && typeof gas === 'string') {
+      debited = debited.add(gas);
+    } else if (sponsored === null) {
+      unknown += 1;
+    }
+  }
+  return { walletDebitedUsdc: debited, unknownPayerCount: unknown };
 }
 
 /** Run every ready item, at most `fanout` in flight at once. */
@@ -76,18 +143,14 @@ async function dispatchConcurrently(
 export async function runBatch(
   deps: OrchestratorDeps,
   runId: string,
-  options: { fanout?: number } = {},
+  options: { fanout?: number; ablation?: 'planner' | 'critic'; planner?: PlannerPort } = {},
 ): Promise<RunResult> {
   const log = deps.log ?? ((): void => {});
   const fanout = options.fanout ?? EXECUTE_FANOUT;
   const runIdOnchain = `0x${randomBytes(32).toString('hex')}`;
 
   let runRow = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
-  let budget: BudgetState = {
-    budgetUsdc: new Prisma.Decimal(runRow.budgetUsdc),
-    spentGasUsdc: new Prisma.Decimal(runRow.spentGasUsdc),
-    spentPayUsdc: new Prisma.Decimal(runRow.spentPayUsdc),
-  };
+  let budget = budgetFromRun(runRow);
   const runEthUsd = new Prisma.Decimal(runRow.runEthUsd);
 
   const openTx = await phaseOpen(
@@ -98,12 +161,19 @@ export async function runBatch(
       : `0x${Buffer.from(runRow.runIdOnchain).toString('hex')}`,
   );
   runRow = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
+  // openRun is a real registry write and therefore part of every subsequent
+  // budget decision. Never critique against the pre-open meter snapshot.
+  budget = budgetFromRun(runRow);
   const effectiveRunIdOnchain =
     runRow.runIdOnchain === null
       ? runIdOnchain
       : `0x${Buffer.from(runRow.runIdOnchain).toString('hex')}`;
   if (runRow.status === 'PLANNING') {
-    await phasePlan(runId);
+    await phasePlan(runId, {
+      ablatePlanner: options.ablation === 'planner',
+      registryAddr: deps.registryAddr,
+      ...(options.planner === undefined ? {} : { planner: options.planner }),
+    });
     // phasePlan advances the persisted run to CRITIQUING. Refresh the row
     // before selecting the next phase; retaining the pre-plan PLANNING value
     // would skip simulation/Critic on every fresh queue-started run.
@@ -114,13 +184,16 @@ export async function runBatch(
   // with at most one re-plan cycle (CVY-011).
   const critique =
     runRow.status === 'CRITIQUING'
-      ? await phaseCritique(deps, runId, budget)
+      ? await phaseCritique(deps, runId, budget, {
+          ...(options.ablation === 'critic' ? { bypassGate: true } : {}),
+        })
       : {
           ready: [] as number[],
           vetoed: [],
           failedIdx: [],
           replanCycles: 0,
           notes: [] as string[],
+          criticConsulted: false,
         };
   const existingItems = await prisma.item.findMany({ where: { runId }, orderBy: { idx: 'asc' } });
   const vetoed = existingItems
@@ -134,6 +207,15 @@ export async function runBatch(
         .map((i) => i.idx),
     ]),
   ];
+  const priority = new Map(
+    plannerPriority(
+      runRow.plan,
+      existingItems.map((item) => item.idx),
+    ).map((idx, position) => [idx, position]),
+  );
+  ready.sort(
+    (left, right) => (priority.get(left) ?? left) - (priority.get(right) ?? right) || left - right,
+  );
   for (const note of critique.notes) log(`  critique: ${note}`);
 
   runRow = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
@@ -144,60 +226,54 @@ export async function runBatch(
       failed: critique.failedIdx,
       replanCycles: critique.replanCycles,
       notes: critique.notes,
-      criticConsulted:
-        critique.vetoed.some((v) => v.criticConsulted === true) || deps.critic !== undefined,
+      criticConsulted: critique.criticConsulted,
     });
   }
 
   const executed: ExecuteOutcome[] = [];
-  let debited = new Prisma.Decimal(0);
-  let unknownPayer = 0;
   let wave = ready;
   while (wave.length > 0) {
+    const beforeWave = budget;
     log(`  EXECUTE wave of ${wave.length} at fanout=${fanout}`);
     const outcomes = await dispatchConcurrently(wave, fanout, async (idx) =>
       executeItem(deps, runId, idx, effectiveRunIdOnchain, runEthUsd),
     );
     executed.push(...outcomes);
 
-    // Drain the meter from the REAL fee in wei, composed from the chain receipt
-    // (L2 + L1) rather than from KeeperHub's sponsorship-dependent `gasUsedWei`
-    // (gaps G-28, G-31). Consumption drains the budget; what the wallet actually
-    // paid is accumulated separately and never folded in (DEC-010).
-    for (const o of outcomes) {
-      if (!o.landed || o.feeWeiTotal === undefined) continue;
-      const fee = weiToFee(o.feeWeiTotal, o.l1FeeIncluded);
-      const u = applyGas(budget, fee, runEthUsd, o.sponsored);
-      budget = u.next;
-      if (u.debitedUsdc !== null) debited = debited.add(u.debitedUsdc);
-      if (u.sponsored === null) unknownPayer += 1;
-      if (u.crossedLow) {
+    // COMMIT and target gas are persisted transactionally by executeItem. The
+    // database is the meter; re-deriving from return values would double-count
+    // recovered/already-accounted outcomes and omit commitAction gas.
+    budget = await loadBudget(runId);
+    if (!isLow(beforeWave) && isLow(budget)) {
+      const existingLow = await prisma.event.findFirst({ where: { runId, type: 'BUDGET_LOW' } });
+      if (existingLow === null) {
+        const wallet = await persistedWalletEvidence(runId);
         await prisma.event.create({
           data: {
             runId,
-            itemIdx: o.idx,
+            itemIdx: outcomes.at(-1)?.idx ?? null,
             type: 'BUDGET_LOW',
             payload: {
               remainingUsdc: remaining(budget).toFixed(6),
               consumedUsdc: budget.spentGasUsdc.toFixed(6),
-              walletDebitedUsdc: debited.toFixed(6),
+              walletDebitedUsdc: wallet.walletDebitedUsdc.toFixed(6),
             },
           },
         });
       }
     }
-    await prisma.run.update({
-      where: { id: runId },
-      data: { spentGasUsdc: budget.spentGasUsdc, spentPayUsdc: budget.spentPayUsdc },
-    });
 
     // App-side deferral gate: dependencies just landed, so re-evaluate.
-    wave = await releaseDeferred(deps, runId, budget);
+    wave = await releaseDeferred(deps, runId, budget, {
+      ...(options.ablation === 'critic' ? { bypassGate: true } : {}),
+    });
     if (wave.length > 0) log(`  deferral gate released ${wave.join(', ')}`);
   }
 
   runRow = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
   if (runRow.status === 'SEALED_OK' || runRow.status === 'SEALED_PARTIAL') {
+    budget = budgetFromRun(runRow);
+    const wallet = await persistedWalletEvidence(runId);
     const sealedEvent = await prisma.event.findFirst({
       where: { runId, type: runRow.status === 'SEALED_OK' ? 'RUN_SEALED' : 'RUN_SEALED_PARTIAL' },
       orderBy: { id: 'desc' },
@@ -216,11 +292,13 @@ export async function runBatch(
       executed,
       vetoed,
       budget,
-      walletDebitedUsdc: debited,
-      unknownPayerCount: unknownPayer,
+      ...wallet,
     };
   }
   const sealed = await phaseSeal(deps, runId, effectiveRunIdOnchain, budget);
+  // sealRun is also a registry write; the returned snapshot must include it.
+  budget = await loadBudget(runId);
+  const wallet = await persistedWalletEvidence(runId);
 
   return {
     runId,
@@ -231,8 +309,7 @@ export async function runBatch(
     executed,
     vetoed,
     budget,
-    walletDebitedUsdc: debited,
-    unknownPayerCount: unknownPayer,
+    ...wallet,
   };
 }
 

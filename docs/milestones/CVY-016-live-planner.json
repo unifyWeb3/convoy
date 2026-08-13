@@ -1,0 +1,272 @@
+{
+  "mode": "planner",
+  "chainId": "84532",
+  "distributorAddress": "0x5c52283f4A56d17009741abbb85b1BB74D49E108",
+  "runId": "72e9b3d9-5e8e-49b1-b9a4-49684cfd15a3",
+  "runIdOnchain": "0xbf5cc4be168c02a48235cb6fc4c4b00bf6a70b55a3b87257500f94e54f70b411",
+  "openTx": "0x953e475c9a5b748700d0e3ea0b089a045cabea92d48ed3c8e7f22ace37a66abc",
+  "sealTx": "0x6f08c50cf93a6da8e64d5e52725c20a8dd8c6aa5079f3dad045b8f75d4d60372",
+  "criticConsulted": true,
+  "plan": {
+    "order": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "source": "ablation-planner",
+    "warnings": [
+      "CVY-016 planner ablation: input order; dependency extraction disabled"
+    ],
+    "deferrals": [],
+    "excludedIdx": [],
+    "gasBudgetPerItem": [
+      {
+        "idx": 0,
+        "gasBudgetUsdc": "10.909091"
+      },
+      {
+        "idx": 1,
+        "gasBudgetUsdc": "10.909091"
+      },
+      {
+        "idx": 2,
+        "gasBudgetUsdc": "10.909091"
+      },
+      {
+        "idx": 3,
+        "gasBudgetUsdc": "10.909091"
+      },
+      {
+        "idx": 4,
+        "gasBudgetUsdc": "10.909091"
+      },
+      {
+        "idx": 5,
+        "gasBudgetUsdc": "10.909091"
+      },
+      {
+        "idx": 6,
+        "gasBudgetUsdc": "10.909091"
+      },
+      {
+        "idx": 7,
+        "gasBudgetUsdc": "10.909091"
+      },
+      {
+        "idx": 8,
+        "gasBudgetUsdc": "10.909091"
+      },
+      {
+        "idx": 9,
+        "gasBudgetUsdc": "10.909091"
+      },
+      {
+        "idx": 10,
+        "gasBudgetUsdc": "10.909091"
+      }
+    ]
+  },
+  "snapshot": {
+    "budgetUsdc": "120",
+    "spentGasUsdc": "0.006555",
+    "spentPayUsdc": "0",
+    "items": [
+      {
+        "idx": 0,
+        "state": "VETOED",
+        "dependsOn": []
+      },
+      {
+        "idx": 1,
+        "state": "VETOED",
+        "dependsOn": []
+      },
+      {
+        "idx": 2,
+        "state": "VETOED",
+        "dependsOn": []
+      },
+      {
+        "idx": 3,
+        "state": "LANDED",
+        "dependsOn": []
+      },
+      {
+        "idx": 4,
+        "state": "VETOED",
+        "dependsOn": []
+      },
+      {
+        "idx": 5,
+        "state": "VETOED",
+        "dependsOn": [],
+        "intendedInvalid": true
+      },
+      {
+        "idx": 6,
+        "state": "VETOED",
+        "dependsOn": [],
+        "intendedInvalid": true
+      },
+      {
+        "idx": 7,
+        "state": "VETOED",
+        "dependsOn": []
+      },
+      {
+        "idx": 8,
+        "state": "VETOED",
+        "dependsOn": []
+      },
+      {
+        "idx": 9,
+        "state": "VETOED",
+        "dependsOn": []
+      },
+      {
+        "idx": 10,
+        "state": "VETOED",
+        "dependsOn": []
+      }
+    ],
+    "attempts": [
+      {
+        "itemIdx": 0,
+        "kind": "SIMULATE",
+        "status": "400",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      },
+      {
+        "itemIdx": 1,
+        "kind": "SIMULATE",
+        "status": "400",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      },
+      {
+        "itemIdx": 2,
+        "kind": "SIMULATE",
+        "status": "400",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      },
+      {
+        "itemIdx": 3,
+        "kind": "SIMULATE",
+        "status": "200",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      },
+      {
+        "itemIdx": 4,
+        "kind": "SIMULATE",
+        "status": "400",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      },
+      {
+        "itemIdx": 5,
+        "kind": "SIMULATE",
+        "status": "400",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      },
+      {
+        "itemIdx": 6,
+        "kind": "SIMULATE",
+        "status": "200",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      },
+      {
+        "itemIdx": 7,
+        "kind": "SIMULATE",
+        "status": "400",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      },
+      {
+        "itemIdx": 8,
+        "kind": "SIMULATE",
+        "status": "400",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      },
+      {
+        "itemIdx": 9,
+        "kind": "SIMULATE",
+        "status": "400",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      },
+      {
+        "itemIdx": 10,
+        "kind": "SIMULATE",
+        "status": "400",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      },
+      {
+        "itemIdx": 3,
+        "kind": "COMMIT",
+        "status": "completed",
+        "txHash": "0x9ffa8947f7bbba71bfa0408af4171f8f6ff0477a76c214d6772a3084762f4e3f",
+        "gasUsedWei": "713027727933",
+        "gasUsedUsdc": "0.002424",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 3,
+        "kind": "EXECUTE",
+        "status": "completed",
+        "txHash": "0x37e5a89bf6f3b8656e6ed28b868d17104c591505ecf5c332b8c5239e045464df",
+        "gasUsedWei": "408006401453",
+        "gasUsedUsdc": "0.001387",
+        "errorCode": null
+      }
+    ]
+  },
+  "metrics": {
+    "landedItemRate": 1,
+    "landedItems": 1,
+    "submittedItems": 1,
+    "failedOrRevertedItems": 0,
+    "wastedGasEvents": 0,
+    "wastedGasUsdc": "0.000000",
+    "budgetSpentUsdc": "0.006555",
+    "budgetDifferenceUsdc": "-0.024412",
+    "invalidSubmissions": 0,
+    "starvedDependents": 0
+  }
+}

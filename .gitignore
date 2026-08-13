@@ -24,6 +24,8 @@ packages/db/node_modules/.prisma/
 .env
 .env.*
 !.env.example
+# GenLayer deployment credential: local operator tooling only, never runtime.
+packages/ai/genlayer/.env.deploy.local
 *.pem
 *.key
 .keeperhub/

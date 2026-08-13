@@ -162,12 +162,17 @@ export async function writeContractCall(
     });
   }
   const status = str(b['status']) ?? 'pending';
+  const retryCount =
+    typeof b['retryCount'] === 'number' && Number.isInteger(b['retryCount']) && b['retryCount'] >= 0
+      ? b['retryCount']
+      : undefined;
 
   return {
     executionId,
     status,
     transactionHash: str(b['transactionHash']),
     transactionLink: str(b['transactionLink']),
+    ...(retryCount === undefined ? {} : { retryCount }),
     ...decodeReportedGas(b),
     terminal: isTerminalStatus(status),
     httpStatus: response.httpStatus,

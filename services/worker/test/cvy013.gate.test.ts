@@ -23,12 +23,26 @@ const ledger = vi.hoisted(() => ({
 vi.mock('@convoy/db', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@convoy/db')>();
   const tx = {
+    run: {
+      update: vi.fn(async () => ({})),
+    },
     item: {
       findUnique: vi.fn(async () => ledger.item),
-      update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-        Object.assign(ledger.item, data);
-        return ledger.item;
-      }),
+      updateMany: vi.fn(
+        async ({
+          where,
+          data,
+        }: {
+          where: { idx: number; state: { in: string[] } };
+          data: Record<string, unknown>;
+        }) => {
+          if (where.idx !== ledger.item.idx || !where.state.in.includes(ledger.item.state)) {
+            return { count: 0 };
+          }
+          Object.assign(ledger.item, data);
+          return { count: 1 };
+        },
+      ),
     },
     event: {
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -37,6 +51,10 @@ vi.mock('@convoy/db', async (importOriginal) => {
       }),
     },
     attempt: {
+      findUnique: vi.fn(
+        async ({ where }: { where: { id: string } }) =>
+          ledger.attempts.find((attempt) => attempt['id'] === where.id) ?? null,
+      ),
       findFirst: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
         return (
           ledger.attempts.find(
@@ -77,7 +95,11 @@ vi.mock('@convoy/db', async (importOriginal) => {
   return {
     ...actual,
     unsafeRawClient: {
-      item: { findUniqueOrThrow: vi.fn(async () => ledger.item) },
+      item: {
+        findUniqueOrThrow: vi.fn(async () => ledger.item),
+        findUnique: tx.item.findUnique,
+        updateMany: tx.item.updateMany,
+      },
       attempt: tx.attempt,
       $transaction: vi.fn(async (work: (client: typeof tx) => Promise<unknown>) => await work(tx)),
     },
@@ -97,14 +119,13 @@ const REGISTRY = '0xec51F84BD04dB4515Aa654a4a4f57Ce7596850dA';
 const TARGET = '0xd45c61797d7283caf8a31d91a5bd6465a45ad561';
 const RUN_ONCHAIN = '0xc013000000000000000000000000000000000000000000000000000000000001';
 
-function khFor(scenario: 'met' | 'unmet' | 'commit-failed' | 'commit-no-hash' | 'retry'): {
+function khFor(scenario: 'met' | 'unmet' | 'commit-failed' | 'commit-no-hash' | 'terminal-coded'): {
   client: KhClient;
   calls: { path: string; body?: Record<string, unknown> }[];
   keys: string[];
 } {
   const calls: { path: string; body?: Record<string, unknown> }[] = [];
   const keys: string[] = [];
-  let gateCalls = 0;
   const fetchImpl: typeof fetch = async (url, init) => {
     const path = new URL(url).pathname;
     const body =
@@ -134,9 +155,22 @@ function khFor(scenario: 'met' | 'unmet' | 'commit-failed' | 'commit-no-hash' | 
       );
     }
     if (path.endsWith('/check-and-execute')) {
-      gateCalls += 1;
-      if (scenario === 'retry' && gateCalls === 1) {
-        return new Response(JSON.stringify({ error: 'N-0001 temporary' }), { status: 409 });
+      if (scenario === 'terminal-coded') {
+        return new Response(
+          JSON.stringify({
+            executed: true,
+            executionId: 'direct_target',
+            status: 'failed',
+            transactionHash: '0xtarget',
+            conditionResult: {
+              met: true,
+              observedValue: 'true',
+              targetValue: 'true',
+              operator: 'eq',
+            },
+          }),
+          { status: 200 },
+        );
       }
       return new Response(
         JSON.stringify(
@@ -167,6 +201,29 @@ function khFor(scenario: 'met' | 'unmet' | 'commit-failed' | 'commit-no-hash' | 
       );
     }
     if (path.endsWith('/status')) {
+      if (scenario === 'commit-failed') {
+        return new Response(
+          JSON.stringify({
+            executionId: 'direct_commit',
+            status: 'failed',
+            transactionHash: '0xcommit',
+            error: 'commitAction failed',
+          }),
+          { status: 200, headers: { 'X-Poll-Interval-Hint': '0' } },
+        );
+      }
+      if (scenario === 'terminal-coded') {
+        return new Response(
+          JSON.stringify({
+            executionId: 'direct_target',
+            status: 'failed',
+            transactionHash: '0xtarget',
+            retryCount: 2,
+            error: 'N-0001 KeeperHub exhausted its internal retries',
+          }),
+          { status: 200, headers: { 'X-Poll-Interval-Hint': '0' } },
+        );
+      }
       if (scenario === 'commit-no-hash') {
         return new Response(JSON.stringify({ executionId: 'direct_commit', status: 'completed' }), {
           status: 200,
@@ -278,8 +335,8 @@ describe('CVY-013 dependency gate', () => {
     });
   });
 
-  it('retries with the next idempotency attempt and then lands once', async () => {
-    const kh = khFor('retry');
+  it('does not create a second submission after a terminal coded failure', async () => {
+    const kh = khFor('terminal-coded');
     const outcome = await executeItem(
       { kh: kh.client, registryAddr: REGISTRY },
       'run-12345678',
@@ -287,10 +344,12 @@ describe('CVY-013 dependency gate', () => {
       RUN_ONCHAIN,
       '3400',
     );
-    expect(outcome.landed).toBe(true);
+    expect(outcome.landed).toBe(false);
     expect(kh.keys).toContain('run-1234-x:1:0');
-    expect(kh.keys).toContain('run-1234-x:1:1');
-    expect(ledger.events.filter((event) => event['type'] === 'ITEM_RETRY')).toHaveLength(1);
+    expect(kh.keys).not.toContain('run-1234-x:1:1');
+    expect(kh.calls.filter(({ path }) => path.endsWith('/check-and-execute'))).toHaveLength(1);
+    expect(ledger.events.filter((event) => event['type'] === 'ITEM_RETRY')).toHaveLength(0);
+    expect(ledger.events.at(-1)?.['payload']).toMatchObject({ code: 'N-0001' });
   });
 
   it('does not reach either target path after a failed commitAction', async () => {

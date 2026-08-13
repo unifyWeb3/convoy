@@ -6,12 +6,66 @@
 // skeletons are shaped to deliver.
 
 import type { ConvoyJobData } from '../queue.js';
+import type { CriticPort, PlannerPort } from '../orchestrator.js';
 
 export interface HandlerContext {
   readonly data: ConvoyJobData;
   /** Cooperative abort — set when the run is aborted or the worker is shutting down. */
   readonly signal: AbortSignal;
   readonly log: (message: string) => void;
+}
+
+export interface ProductionAi {
+  readonly planner?: PlannerPort;
+  readonly critic?: CriticPort;
+  readonly plannerFallback: boolean;
+  readonly criticFallback: boolean;
+}
+
+/** Compose the existing Planner/Critic modules for the production lifecycle. */
+export async function composeProductionAi(log: (message: string) => void): Promise<ProductionAi> {
+  const { planRun } = await import('@convoy/ai/planner');
+  const { createConfiguredLlmCaller } = await import('@convoy/ai/provider');
+  const { critiqueAction } = await import('@convoy/ai/critic');
+  let call: ReturnType<typeof createConfiguredLlmCaller> | undefined;
+  try {
+    call = createConfiguredLlmCaller();
+  } catch (error) {
+    log(
+      `AI fallback active: ${error instanceof Error ? error.message : String(error)}; ` +
+        'Planner=deterministic, Critic=simulator-only',
+    );
+  }
+  const planner: PlannerPort = async (input) => {
+    const result = await planRun(
+      {
+        budgetUsdc: input.budgetUsdc,
+        ...(input.deadline === undefined ? {} : { deadline: input.deadline }),
+        items: input.items.map((item) => ({
+          idx: item.idx,
+          target: item.target,
+          functionName: item.functionName,
+          functionArgs: item.functionArgs,
+          evidence: item.evidence,
+        })),
+      },
+      call,
+      {
+        whitelist: ['RewardDistributor', 'ConvoyRegistry'],
+        declaredEdges: input.items.flatMap((item) =>
+          item.dependsOn.map((dependsOn) => ({ idx: item.idx, dependsOn })),
+        ),
+      },
+    );
+    return result.plan;
+  };
+
+  const critic: CriticPort = async (action, facts) => {
+    const result = await critiqueAction(action, call, facts);
+    return result.final;
+  };
+  const fallback = call === undefined;
+  return { planner, critic, plannerFallback: fallback, criticFallback: fallback };
 }
 
 /** Production handlers share the single runBatch/orchestrator path. */
@@ -21,9 +75,19 @@ export async function runProductionLifecycle(ctx: HandlerContext): Promise<Handl
   if (registryAddr === undefined || registryAddr === '') {
     throw new Error('CONVOY_REGISTRY_ADDR is not set');
   }
-  const result = await runBatch({ kh: khFromEnv(), registryAddr, log: ctx.log }, ctx.data.runId, {
-    fanout: Number(process.env['CONVOY_EXECUTE_FANOUT'] ?? '4'),
-  });
+  const ai = await composeProductionAi(ctx.log);
+  const result = await runBatch(
+    {
+      kh: khFromEnv(),
+      registryAddr,
+      log: ctx.log,
+      ...(ai.critic === undefined ? {} : { critic: ai.critic }),
+    },
+    ctx.data.runId,
+    {
+      ...(ai.planner === undefined ? {} : { planner: ai.planner }),
+    },
+  );
   return { outcome: 'done', detail: `${result.status} run ${result.runId}` };
 }
 

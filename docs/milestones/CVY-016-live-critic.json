@@ -1,0 +1,422 @@
+{
+  "mode": "critic",
+  "chainId": "84532",
+  "distributorAddress": "0x350e9ac23E1f35f042EFa11AFfbC7fbCA005Af1B",
+  "runId": "f7243450-9aaa-49cf-97c3-fa0431dc7144",
+  "runIdOnchain": "0xe2be0560a5373d2b2f2e8092e8aab0f3cd1720e7c265676cc2c552dff042518e",
+  "openTx": "0x6ce258c2f15aea24c22b13d6bfedb6288eb2e47a8389ee637a9251cc72713c74",
+  "sealTx": "0x701404d88daa13f438a6af396827774b2c7082dbd0de0e325a60ad8309868b66",
+  "criticConsulted": false,
+  "plan": {
+    "order": [
+      3,
+      5,
+      6,
+      1,
+      4,
+      10,
+      0,
+      2,
+      7,
+      8,
+      9
+    ],
+    "source": "planner",
+    "attempts": 0,
+    "warnings": [],
+    "deferrals": [
+      {
+        "idx": 0,
+        "dependsOn": 4
+      },
+      {
+        "idx": 1,
+        "dependsOn": 3
+      },
+      {
+        "idx": 2,
+        "dependsOn": 1
+      },
+      {
+        "idx": 4,
+        "dependsOn": 3
+      },
+      {
+        "idx": 5,
+        "dependsOn": 2
+      },
+      {
+        "idx": 7,
+        "dependsOn": 1
+      },
+      {
+        "idx": 8,
+        "dependsOn": 1
+      },
+      {
+        "idx": 9,
+        "dependsOn": 1
+      },
+      {
+        "idx": 10,
+        "dependsOn": 5
+      }
+    ],
+    "excludedIdx": [],
+    "plannerFallback": false,
+    "gasBudgetPerItem": [],
+    "plannerDeferrals": [
+      {
+        "idx": 0,
+        "dependsOn": 4
+      },
+      {
+        "idx": 1,
+        "dependsOn": 3
+      },
+      {
+        "idx": 2,
+        "dependsOn": 1
+      },
+      {
+        "idx": 4,
+        "dependsOn": 3
+      },
+      {
+        "idx": 5,
+        "dependsOn": 2
+      },
+      {
+        "idx": 7,
+        "dependsOn": 1
+      },
+      {
+        "idx": 8,
+        "dependsOn": 1
+      },
+      {
+        "idx": 9,
+        "dependsOn": 1
+      },
+      {
+        "idx": 10,
+        "dependsOn": 5
+      }
+    ],
+    "rationalePerItem": [],
+    "declaredDeferrals": [
+      {
+        "idx": 0,
+        "dependsOn": 4
+      },
+      {
+        "idx": 1,
+        "dependsOn": 3
+      },
+      {
+        "idx": 2,
+        "dependsOn": 1
+      },
+      {
+        "idx": 4,
+        "dependsOn": 3
+      },
+      {
+        "idx": 5,
+        "dependsOn": 2
+      },
+      {
+        "idx": 7,
+        "dependsOn": 1
+      },
+      {
+        "idx": 8,
+        "dependsOn": 1
+      },
+      {
+        "idx": 9,
+        "dependsOn": 1
+      },
+      {
+        "idx": 10,
+        "dependsOn": 5
+      }
+    ]
+  },
+  "snapshot": {
+    "budgetUsdc": "120",
+    "spentGasUsdc": "0.035589",
+    "spentPayUsdc": "0",
+    "items": [
+      {
+        "idx": 0,
+        "state": "LANDED",
+        "dependsOn": [
+          4
+        ]
+      },
+      {
+        "idx": 1,
+        "state": "LANDED",
+        "dependsOn": [
+          3
+        ]
+      },
+      {
+        "idx": 2,
+        "state": "LANDED",
+        "dependsOn": [
+          1
+        ]
+      },
+      {
+        "idx": 3,
+        "state": "LANDED",
+        "dependsOn": []
+      },
+      {
+        "idx": 4,
+        "state": "LANDED",
+        "dependsOn": [
+          3
+        ]
+      },
+      {
+        "idx": 5,
+        "state": "FAILED",
+        "dependsOn": [
+          2
+        ],
+        "intendedInvalid": true
+      },
+      {
+        "idx": 6,
+        "state": "FAILED",
+        "dependsOn": [],
+        "intendedInvalid": true
+      },
+      {
+        "idx": 7,
+        "state": "LANDED",
+        "dependsOn": [
+          1
+        ]
+      },
+      {
+        "idx": 8,
+        "state": "LANDED",
+        "dependsOn": [
+          1
+        ]
+      },
+      {
+        "idx": 9,
+        "state": "LANDED",
+        "dependsOn": [
+          1
+        ]
+      },
+      {
+        "idx": 10,
+        "state": "DEFERRED",
+        "dependsOn": [
+          5
+        ]
+      }
+    ],
+    "attempts": [
+      {
+        "itemIdx": 3,
+        "kind": "COMMIT",
+        "status": "completed",
+        "txHash": "0x670297e7d6fb49d98f26512d64f02c207b52f3dfe4de5e22aa4013b33d528abf",
+        "gasUsedWei": "713030370604",
+        "gasUsedUsdc": "0.002424",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 3,
+        "kind": "EXECUTE",
+        "status": "completed",
+        "txHash": "0x567860e8b716ac8de29754eebdb675b1396c53e2fd94c9b75a39179367e0bc77",
+        "gasUsedWei": "408353298039",
+        "gasUsedUsdc": "0.001388",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 6,
+        "kind": "COMMIT",
+        "status": "completed",
+        "txHash": "0xd8757b2c6bde33741eb91f2f1593a5092ae688f623da83c5e386ae571888613b",
+        "gasUsedWei": "611297703142",
+        "gasUsedUsdc": "0.002078",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 6,
+        "kind": "EXECUTE",
+        "status": "failed",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      },
+      {
+        "itemIdx": 1,
+        "kind": "COMMIT",
+        "status": "completed",
+        "txHash": "0x51fcc3437f428fd72b7edd8b974341851e7d8d5964305cd4b8c9ed010fb331f5",
+        "gasUsedWei": "611633722715",
+        "gasUsedUsdc": "0.00208",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 1,
+        "kind": "EXECUTE",
+        "status": "completed",
+        "txHash": "0x221dc6de9bad15564cf3a266781e317a79bf30fbcca3d68c7d6819ea2c18d8e9",
+        "gasUsedWei": "460783493636",
+        "gasUsedUsdc": "0.001567",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 4,
+        "kind": "COMMIT",
+        "status": "completed",
+        "txHash": "0xda4ef090a7d1a6c7cfa5e7d64eaca9b0bb8f002af7480a7cbb35f24fa3e5311f",
+        "gasUsedWei": "610356176256",
+        "gasUsedUsdc": "0.002075",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 4,
+        "kind": "EXECUTE",
+        "status": "completed",
+        "txHash": "0x80f586c18b34ea967372eeda73eabb2605ed2d17924058a569fae39659897899",
+        "gasUsedWei": "347343107010",
+        "gasUsedUsdc": "0.001181",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 0,
+        "kind": "COMMIT",
+        "status": "completed",
+        "txHash": "0x9a8d5455b461d1d7015bdeb4e5a058b7e29f6c7280d5b0339a19e8f595da0404",
+        "gasUsedWei": "610284176256",
+        "gasUsedUsdc": "0.002075",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 0,
+        "kind": "EXECUTE",
+        "status": "completed",
+        "txHash": "0xdde5b47383b555396e1fb3e61855e412a2cd04d3d5f723522125ead9d1912bfe",
+        "gasUsedWei": "419515633490",
+        "gasUsedUsdc": "0.001426",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 2,
+        "kind": "COMMIT",
+        "status": "completed",
+        "txHash": "0x2c57aea65b101005d841f631d5bf11edf686965575a2fea6257c680cffecc700",
+        "gasUsedWei": "611195053996",
+        "gasUsedUsdc": "0.002078",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 2,
+        "kind": "EXECUTE",
+        "status": "completed",
+        "txHash": "0xee4624d957380b1ad40f0522e44e6df653e72bdc68eaead8bb8f8caaace94bf8",
+        "gasUsedWei": "461103828398",
+        "gasUsedUsdc": "0.001568",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 7,
+        "kind": "COMMIT",
+        "status": "completed",
+        "txHash": "0xaac48dcab16a56411b1b7e3c49171e4f28cddf34b422dda0a5551bc810830f34",
+        "gasUsedWei": "670781367555",
+        "gasUsedUsdc": "0.002281",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 7,
+        "kind": "EXECUTE",
+        "status": "completed",
+        "txHash": "0xd3a99072773c6ef9cdec62a0a26670aa13cd249bc7bf86eced6b8e45f738a84e",
+        "gasUsedWei": "460931890199",
+        "gasUsedUsdc": "0.001567",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 8,
+        "kind": "COMMIT",
+        "status": "completed",
+        "txHash": "0x04ca046c879d0b53e62a9893f8eb359ef88969251b79c8ace0583d41daabbdcd",
+        "gasUsedWei": "611055553424",
+        "gasUsedUsdc": "0.002078",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 8,
+        "kind": "EXECUTE",
+        "status": "completed",
+        "txHash": "0xa2e375c9aac6554ff7ebaeccd03f781003dfe9770c4ddf6f08ba945d1a915781",
+        "gasUsedWei": "419975784759",
+        "gasUsedUsdc": "0.001428",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 9,
+        "kind": "COMMIT",
+        "status": "completed",
+        "txHash": "0xce6a90cc8ebfcb79c06d0acd5aa1a02d9055b3d991f406c2d667f9da6432f163",
+        "gasUsedWei": "610311963271",
+        "gasUsedUsdc": "0.002075",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 9,
+        "kind": "EXECUTE",
+        "status": "completed",
+        "txHash": "0x17ea84cc7ad5025d1bc6ef8955d9435edaf71f08c83342cde8176cbb5084a65e",
+        "gasUsedWei": "426577022847",
+        "gasUsedUsdc": "0.00145",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 5,
+        "kind": "COMMIT",
+        "status": "completed",
+        "txHash": "0x514a51ecfc60577d8467e59bbc3a42e9bdde730dae29a86111b119e8ad5cf8de",
+        "gasUsedWei": "630411746757",
+        "gasUsedUsdc": "0.002143",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 5,
+        "kind": "EXECUTE",
+        "status": "failed",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      }
+    ]
+  },
+  "metrics": {
+    "landedItemRate": 0.8,
+    "landedItems": 8,
+    "submittedItems": 10,
+    "failedOrRevertedItems": 2,
+    "wastedGasEvents": 0,
+    "wastedGasUsdc": "0.000000",
+    "budgetSpentUsdc": "0.035589",
+    "budgetDifferenceUsdc": "0.004622",
+    "invalidSubmissions": 2,
+    "starvedDependents": 1
+  }
+}

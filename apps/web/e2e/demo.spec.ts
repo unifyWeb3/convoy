@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 
-const runId = process.env['CONVOY_E2E_RUN_ID'];
+const runId = process.env['CONVOY_GATE2_RUN_ID'];
 const evidenceDir = process.env['GATE2_EVIDENCE_DIR'] ?? '/tmp/convoy-gate2-evidence';
 
 test('CVY-GATE2 12-item run, live DAG, refresh and manifest', async ({ page }) => {
-  test.skip(runId === undefined, 'CONVOY_E2E_RUN_ID is required for the real gate run');
+  test.skip(runId === undefined, 'CONVOY_GATE2_RUN_ID is required for the real gate run');
   test.setTimeout(600_000);
   mkdirSync(evidenceDir, { recursive: true });
 
@@ -18,14 +18,14 @@ test('CVY-GATE2 12-item run, live DAG, refresh and manifest', async ({ page }) =
     .or(page.getByText('SEALED PARTIAL', { exact: true }))
     .first();
   if (process.env['GATE2_FINAL_ONLY'] !== '1' && (await terminal.count()) === 0) {
-    await page.getByRole('button', { name: 'Dependency DAG' }).click();
+    await page.getByRole('tab', { name: 'Dependency DAG' }).click();
     await expect(page.getByTestId('dag-canvas')).toBeVisible();
     await expect(page.locator('.react-flow__node')).toHaveCount(12);
     await expect(page.locator('.react-flow__edge')).toHaveCount(7);
     await expect(page.locator('.convoy-edge-deferred').first()).toBeVisible({ timeout: 240_000 });
     await page.screenshot({ path: `${evidenceDir}/dag-deferred.png`, fullPage: true });
 
-    await page.getByRole('button', { name: 'Actions & timeline' }).click();
+    await page.getByRole('tab', { name: 'Actions & timeline' }).click();
     await expect(page.getByText('Landed on Base Sepolia').first()).toBeVisible({
       timeout: 240_000,
     });
@@ -45,15 +45,14 @@ test('CVY-GATE2 12-item run, live DAG, refresh and manifest', async ({ page }) =
   await expect(page.getByText('MarketAlreadyEnabled').first()).toBeVisible();
   await expect(page.getByText('RootAlreadySet').first()).toBeVisible();
 
-  await page.getByRole('button', { name: 'Dependency DAG' }).click();
+  await page.getByRole('tab', { name: 'Dependency DAG' }).click();
   await expect(page.locator('.convoy-edge-ready')).toHaveCount(7);
   await page.screenshot({ path: `${evidenceDir}/dag-final.png`, fullPage: true });
 
-  await page.getByRole('button', { name: 'Proof manifest' }).click();
-  await page.getByRole('button', { name: 'Copy JSON' }).click();
+  await page.getByRole('tab', { name: 'Proof manifest' }).click();
   await expect(page.getByText('Canonical SHA-256')).toBeVisible({ timeout: 120_000 });
   await expect(page.locator('tbody tr')).toHaveCount(12, { timeout: 120_000 });
-  await expect(page.getByText('AMBER')).toHaveCount(12);
+  await expect(page.locator('tbody').getByText('AMBER', { exact: true })).toHaveCount(12);
   // The current registry-provider error embeds the configured RPC URL (G-42).
   // Keep the browser proof useful without persisting that credential in the
   // screenshot; the raw manifest itself remains the canonical local artifact.

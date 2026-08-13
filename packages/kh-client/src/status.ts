@@ -37,6 +37,10 @@ export async function getExecutionStatus(
       : {};
   const s = (v: unknown): string | undefined => (typeof v === 'string' && v !== '' ? v : undefined);
   const status = s(b['status']) ?? 'pending';
+  const retryCount =
+    typeof b['retryCount'] === 'number' && Number.isInteger(b['retryCount']) && b['retryCount'] >= 0
+      ? b['retryCount']
+      : undefined;
   const hintMs = parsePollHint(response.headers.get(POLL_HINT_HEADER));
 
   return {
@@ -44,6 +48,7 @@ export async function getExecutionStatus(
     status,
     transactionHash: s(b['transactionHash']),
     transactionLink: s(b['transactionLink']),
+    ...(retryCount === undefined ? {} : { retryCount }),
     ...decodeReportedGas(b),
     // A 0 hint is an explicit terminal signal even if the status string lags.
     terminal: isTerminalStatus(status) || hintMs === 0,
@@ -87,6 +92,7 @@ export async function pollUntilTerminal(
       status: write.status,
       transactionHash: write.transactionHash,
       transactionLink: write.transactionLink,
+      ...(write.retryCount === undefined ? {} : { retryCount: write.retryCount }),
       ...(write.gasUsedUnits !== undefined ? { gasUsedUnits: write.gasUsedUnits } : {}),
       ...(write.gasFeeWeiL2 !== undefined ? { gasFeeWeiL2: write.gasFeeWeiL2 } : {}),
       ...(write.gasReportedRaw !== undefined ? { gasReportedRaw: write.gasReportedRaw } : {}),

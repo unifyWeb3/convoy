@@ -42,6 +42,7 @@ describe('write — executionId', () => {
       transactionLink: 'https://sepolia.basescan.org/tx/0xdead',
       gasUsedWei: '21000',
       sponsored: true,
+      retryCount: 1,
     });
 
     const result = await writeContractCall(client, PARAMS, REF);
@@ -51,6 +52,7 @@ describe('write — executionId', () => {
     // `sponsored:true` is what makes `gasUsedWei` readable as units (gap G-31).
     expect(result.gasUsedUnits).toBe('21000');
     expect(result.gasFeeWeiL2).toBeUndefined();
+    expect(result.retryCount).toBe(1);
   });
 
   it('marks a synchronous completed write terminal so the poll is skipped (gap G-02)', async () => {

@@ -37,7 +37,7 @@ function attempt(
 function item(idx: number, values: Partial<TimelineItem> = {}): TimelineItem {
   return {
     idx,
-    targetAddress: `0x${String(idx + 1).padStart(40, '0')}`,
+    targetAddress: `target-${idx}`,
     functionName: `action${idx}`,
     functionArgs: [],
     evidence: `Evidence for ${idx}`,
@@ -72,11 +72,12 @@ function event(
 function snapshot(
   items: readonly TimelineItem[],
   events: readonly TimelineEvent[],
+  status = 'EXECUTING',
 ): TimelineSnapshot {
   return {
     run: {
       id: 'run-1',
-      status: 'EXECUTING',
+      status,
       budgetUsdc: '10',
       spentGasUsdc: '1',
       spentPayUsdc: '0',
@@ -98,7 +99,7 @@ describe('Timeline', () => {
 
     expect(deriveItemState(row, events)).toBe('SUBMITTED');
     const html = renderToStaticMarkup(<Timeline runId="run-1" initial={snapshot([row], events)} />);
-    expect(html).toContain('border-sky-200 bg-sky-50 text-sky-800">SUBMITTED</span>');
+    expect(html).toContain('data-state="SUBMITTED"');
   });
 
   it('preserves budget-exhausted items as SKIPPED instead of relabelling them FAILED', () => {
@@ -110,22 +111,34 @@ describe('Timeline', () => {
       <Timeline runId="run-1" initial={snapshot([skipped], events)} />,
     );
     expect(html).toContain('>SKIPPED</span>');
-    expect(html).toContain('Skipped after the run budget was exhausted');
+    expect(html).toContain('budget exhausted');
   });
 
   it('stacks multiple observed retries visibly', () => {
     const events = [
-      event('2', 0, 'ITEM_RETRY', { attempt: 1, code: 'N-0001' }),
+      event('2', 0, 'ITEM_RETRY', { retryCount: 1, code: 'N-0001' }),
       event('3', 0, 'ITEM_SUBMITTED', { attempt: 1 }),
-      event('4', 0, 'ITEM_RETRY', { attempt: 2, code: 'E-0002' }),
+      event('4', 0, 'ITEM_RETRY', { retryCount: 2, code: 'E-0002' }),
       event('5', 0, 'ITEM_SUBMITTED', { attempt: 2 }),
     ];
     const html = renderToStaticMarkup(
       <Timeline runId="run-1" initial={snapshot([item(0)], events)} />,
     );
 
-    expect(html).toContain('retry 1 N-0001');
-    expect(html).toContain('retry 2 E-0002');
+    expect(html).toContain('retry observed · provider count 1 · N-0001');
+    expect(html).toContain('retry observed · provider count 2 · E-0002');
+  });
+
+  it('does not invent a retry count when the ledger did not record one', () => {
+    const html = renderToStaticMarkup(
+      <Timeline
+        runId="run-1"
+        initial={snapshot([item(0)], [event('2', 0, 'ITEM_RETRY', { code: 'N-0001' })])}
+      />,
+    );
+
+    expect(html).toContain('retry observed · N-0001');
+    expect(html).not.toContain('provider count');
   });
 
   it('merges live attempt snapshots into the audit drawer', () => {
@@ -163,7 +176,7 @@ describe('Timeline', () => {
     expect(html).toContain('hash: 0xcommit');
     expect(html).toContain('hash: 0xexecute');
     expect(html).toContain('href="https://sepolia.basescan.org/tx/0xexecute"');
-    expect(html).toContain('RETRY #1');
+    expect(html).toContain('RETRY OBSERVED');
     expect(html).toContain('code: N-0001');
   });
 
@@ -177,11 +190,21 @@ describe('Timeline', () => {
     const afterSimulation = renderToStaticMarkup(
       <AuditDrawer
         item={item(0)}
-        events={[event('1', 0, 'ITEM_SIMULATED', { wouldRevert: false })]}
+        events={[event('1', 0, 'ITEM_SIMULATED', { wouldRevert: false, criticConsulted: true })]}
         onClose={() => undefined}
       />,
     );
     expect(afterSimulation).toContain('APPROVED</dd>');
+
+    const withoutCritic = renderToStaticMarkup(
+      <AuditDrawer
+        item={item(0)}
+        events={[event('1', 0, 'ITEM_SIMULATED', { wouldRevert: false, criticConsulted: false })]}
+        onClose={() => undefined}
+      />,
+    );
+    expect(withoutCritic).toContain('SIMULATION PASSED</dd>');
+    expect(withoutCritic).not.toContain('APPROVED</dd>');
   });
 
   it('treats pre-seal RUN_SEALED as SEALING until the final event', () => {
@@ -210,6 +233,7 @@ describe('Timeline', () => {
       event('1', 0, 'ITEM_VETOED', {
         reason: 'would_revert',
         revert: 'RootAlreadySet()',
+        gasSpent: 0,
       }),
       event('2', 1, 'ITEM_FAILED', { code: 'C-0001', reason: 'execution failed' }),
     ];
@@ -217,9 +241,71 @@ describe('Timeline', () => {
       <Timeline runId="run-1" initial={snapshot([vetoed, failed], events)} />,
     );
 
-    expect(html).toContain('0 gas · RootAlreadySet()');
+    expect(html).toContain('0 gas recorded · RootAlreadySet()');
     expect(html).toContain('execution failed');
     expect(html).toContain('VETOED');
     expect(html).toContain('FAILED');
+  });
+
+  it('marks phases after a veto as unreached', () => {
+    const vetoed = item(0, { state: 'VETOED', vetoReason: 'would_revert' });
+    const html = renderToStaticMarkup(
+      <Timeline
+        runId="run-1"
+        initial={snapshot(
+          [vetoed],
+          [
+            event('1', 0, 'ITEM_SIMULATED', { wouldRevert: true }),
+            event('2', 0, 'ITEM_VETOED', { reason: 'would_revert' }),
+          ],
+        )}
+      />,
+    );
+
+    expect(html).toMatch(/data-phase="PLANNED" data-phase-state="reached"/);
+    expect(html).toMatch(/data-phase="SIMULATED" data-phase-state="reached"/);
+    expect(html).toMatch(
+      /data-phase="COMMITTED" data-phase-state="unreached"[^>]*>.*?data-state="PENDING".*?COMMITTED<\/span>/,
+    );
+    expect(html).toMatch(/data-phase="SUBMITTED" data-phase-state="unreached"/);
+    expect(html).toMatch(/data-phase="LANDED" data-phase-state="unreached"/);
+    expect(html).toContain('data-current-item-state="VETOED"');
+    expect(html).toContain('stopped · VETOED');
+  });
+
+  it('keeps deferred work current without implying later phases occurred', () => {
+    const deferred = item(0, { state: 'DEFERRED', dependsOn: [1] });
+    const html = renderToStaticMarkup(
+      <Timeline
+        runId="run-1"
+        initial={snapshot([deferred, item(1)], [event('1', 0, 'ITEM_DEFERRED', {})])}
+      />,
+    );
+
+    expect(html).toMatch(/data-phase="PLANNED" data-phase-state="reached"/);
+    for (const phase of ['SIMULATED', 'COMMITTED', 'SUBMITTED', 'LANDED']) {
+      expect(html).toMatch(new RegExp(`data-phase="${phase}" data-phase-state="unreached"`));
+    }
+    expect(html).toContain('data-current-item-state="DEFERRED"');
+    expect(html).toContain('current · DEFERRED');
+  });
+
+  it('renders terminal deferred work as stopped rather than actively waiting', () => {
+    const deferred = item(0, { state: 'DEFERRED', dependsOn: [1] });
+    const html = renderToStaticMarkup(
+      <Timeline
+        runId="run-1"
+        initial={snapshot(
+          [deferred, item(1, { state: 'VETOED' })],
+          [event('1', 0, 'ITEM_DEFERRED', {})],
+          'SEALED_OK',
+        )}
+      />,
+    );
+
+    expect(html).toContain('Prerequisite did not land before the run sealed');
+    expect(html).toContain('stopped · DEFERRED');
+    expect(html).not.toContain('current · DEFERRED');
+    expect(html).not.toContain('Waiting for prerequisite actions');
   });
 });

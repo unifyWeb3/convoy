@@ -1,0 +1,225 @@
+{
+  "model": "genlayer/bradbury-consensus",
+  "order": [
+    3,
+    5,
+    6,
+    1,
+    4,
+    10,
+    0,
+    2,
+    7,
+    8,
+    9
+  ],
+  "source": "planner",
+  "attempts": 1,
+  "warnings": [
+    "order contradicted 1 deferral(s); re-derived topologically"
+  ],
+  "deferrals": [
+    {
+      "idx": 0,
+      "dependsOn": 4
+    },
+    {
+      "idx": 1,
+      "dependsOn": 3
+    },
+    {
+      "idx": 2,
+      "dependsOn": 1
+    },
+    {
+      "idx": 4,
+      "dependsOn": 3
+    },
+    {
+      "idx": 5,
+      "dependsOn": 2
+    },
+    {
+      "idx": 7,
+      "dependsOn": 1
+    },
+    {
+      "idx": 8,
+      "dependsOn": 1
+    },
+    {
+      "idx": 9,
+      "dependsOn": 1
+    },
+    {
+      "idx": 10,
+      "dependsOn": 5
+    }
+  ],
+  "excludedIdx": [],
+  "plannerFallback": false,
+  "gasBudgetPerItem": [
+    {
+      "idx": 0,
+      "gasBudgetUsdc": "10.000000"
+    },
+    {
+      "idx": 1,
+      "gasBudgetUsdc": "10.000000"
+    },
+    {
+      "idx": 2,
+      "gasBudgetUsdc": "10.000000"
+    },
+    {
+      "idx": 3,
+      "gasBudgetUsdc": "10.000000"
+    },
+    {
+      "idx": 4,
+      "gasBudgetUsdc": "10.000000"
+    },
+    {
+      "idx": 5,
+      "gasBudgetUsdc": "10.000000"
+    },
+    {
+      "idx": 6,
+      "gasBudgetUsdc": "10.000000"
+    },
+    {
+      "idx": 7,
+      "gasBudgetUsdc": "10.000000"
+    },
+    {
+      "idx": 8,
+      "gasBudgetUsdc": "10.000000"
+    },
+    {
+      "idx": 9,
+      "gasBudgetUsdc": "10.000000"
+    },
+    {
+      "idx": 10,
+      "gasBudgetUsdc": "10.000000"
+    }
+  ],
+  "plannerDeferrals": [
+    {
+      "idx": 4,
+      "dependsOn": 3
+    },
+    {
+      "idx": 1,
+      "dependsOn": 3
+    },
+    {
+      "idx": 2,
+      "dependsOn": 1
+    },
+    {
+      "idx": 7,
+      "dependsOn": 1
+    },
+    {
+      "idx": 8,
+      "dependsOn": 1
+    },
+    {
+      "idx": 9,
+      "dependsOn": 1
+    },
+    {
+      "idx": 0,
+      "dependsOn": 4
+    },
+    {
+      "idx": 10,
+      "dependsOn": 5
+    }
+  ],
+  "rationalePerItem": [
+    {
+      "idx": 0,
+      "rationale": "Enabled market 100 after the top-up (item 4) because evidence states it must wait for the late-claim top-up to land."
+    },
+    {
+      "idx": 1,
+      "rationale": "Funded 250 USDC after the root (item 3) because evidence states it must wait for the epoch root to be published."
+    },
+    {
+      "idx": 2,
+      "rationale": "Enabled market 101 after funding (item 1) because evidence states it must wait for funding to land."
+    },
+    {
+      "idx": 3,
+      "rationale": "Published the epoch Merkle root first because evidence states it must be done before any funding or market opening."
+    },
+    {
+      "idx": 4,
+      "rationale": "Topped up 75 USDC after the root (item 3) because evidence states it must wait for the root to be published."
+    },
+    {
+      "idx": 5,
+      "rationale": "Placed after legitimate market openings as it is an invalid duplicate that the contract should reject."
+    },
+    {
+      "idx": 6,
+      "rationale": "Placed last as it is an invalid second root submission that the contract should reject."
+    },
+    {
+      "idx": 7,
+      "rationale": "Enabled market 104 after funding (item 1) because evidence states it must wait for funding to land."
+    },
+    {
+      "idx": 8,
+      "rationale": "Enabled market 105 after funding (item 1) because evidence states it must wait for funding to land."
+    },
+    {
+      "idx": 9,
+      "rationale": "Enabled market 106 after funding (item 1) because evidence states it must wait for funding to land."
+    },
+    {
+      "idx": 10,
+      "rationale": "Enabled market 107 after the duplicate-market audit action (item 5) because evidence states it must wait for that action to be accepted."
+    }
+  ],
+  "declaredDeferrals": [
+    {
+      "idx": 0,
+      "dependsOn": 4
+    },
+    {
+      "idx": 1,
+      "dependsOn": 3
+    },
+    {
+      "idx": 2,
+      "dependsOn": 1
+    },
+    {
+      "idx": 4,
+      "dependsOn": 3
+    },
+    {
+      "idx": 5,
+      "dependsOn": 2
+    },
+    {
+      "idx": 7,
+      "dependsOn": 1
+    },
+    {
+      "idx": 8,
+      "dependsOn": 1
+    },
+    {
+      "idx": 9,
+      "dependsOn": 1
+    },
+    {
+      "idx": 10,
+      "dependsOn": 5
+    }
+  ]
+}

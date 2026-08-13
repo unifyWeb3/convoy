@@ -62,6 +62,7 @@ describe('getExecutionStatus', () => {
           transactionLink: 'https://sepolia.basescan.org/tx/0xabc',
           gasUsedWei: '31000',
           sponsored: true,
+          retryCount: 2,
         },
         headers: { 'X-Poll-Interval-Hint': '0' },
       },
@@ -73,6 +74,7 @@ describe('getExecutionStatus', () => {
     expect(result.status).toBe('completed');
     expect(result.transactionHash).toBe('0xabc');
     expect(result.gasUsedUnits).toBe('31000');
+    expect(result.retryCount).toBe(2);
     expect(result.pollIntervalHintMs).toBe(0);
     expect(result.terminal).toBe(true);
   });
@@ -160,6 +162,7 @@ describe('pollUntilTerminal', () => {
       executionId: 'direct_1',
       status: 'completed',
       transactionHash: '0xabc',
+      retryCount: 3,
       terminal: true,
       httpStatus: 202,
       raw: {},
@@ -168,6 +171,7 @@ describe('pollUntilTerminal', () => {
     const result = await pollUntilTerminal(client, done);
     expect(result.status).toBe('completed');
     expect(result.transactionHash).toBe('0xabc');
+    expect(result.retryCount).toBe(3);
     // The whole point: a synchronous write costs zero status calls.
     expect(calls).toBe(0);
   });

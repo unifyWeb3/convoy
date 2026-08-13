@@ -3,8 +3,12 @@
 // Every value here is a named constant with a documented default, because each
 // one is a decision someone will need to revisit with a reason.
 
-function intFromEnv(name: string, fallback: number): number {
-  const raw = process.env[name];
+export function intFromEnv(
+  name: string,
+  fallback: number,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const raw = env[name];
   if (raw === undefined || raw.trim() === '') return fallback;
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 1) {
@@ -18,21 +22,22 @@ export const QUEUE_NAME = 'convoy';
 /**
  * How many ready items one run's EXECUTE phase dispatches concurrently.
  *
- * **This must never be 1.** See DEC-002. `docs/ARCHITECTURE.md` requires Convoy
- * to submit concurrently against the single org wallet so that KeeperHub's
- * sequential-nonce manager is what serializes them — that contention is the
- * demo's reliability beat and the deterministic half of backup path d. Submit
- * serially and there is nothing to serialize, and the narration becomes an
- * overclaim.
+ * The safe production default is serial fanout. A wider value remains an
+ * explicit measurement/rehearsal override via `CONVOY_EXECUTE_FANOUT`; the
+ * historical fanout-4/12 measurements are not current stability evidence.
  *
  * Run-level *phase* orchestration stays serial regardless: PLAN → CRITIQUE →
  * EXECUTE → SEAL, one phase at a time. This governs fan-out inside EXECUTE only.
  *
- * Default 4 is **provisional**, chosen properly at CVY-008 against a real
- * 12-item batch: enough to create genuine nonce contention, comfortably under
- * the observed KeeperHub rate limit (`x-ratelimit-limit: 60`).
+ * Default 1 is deliberate: G-40 recorded real KeeperHub `InvalidNonce()` target
+ * failures at fanout 4, while the same action set completed with fanout 1.
  */
-export const EXECUTE_FANOUT = intFromEnv('CONVOY_EXECUTE_FANOUT', 4);
+export const EXECUTE_FANOUT = intFromEnv('CONVOY_EXECUTE_FANOUT', 1);
+
+/** Resolve the canonical execution fanout for composition and focused tests. */
+export function executeFanout(env: NodeJS.ProcessEnv = process.env): number {
+  return intFromEnv('CONVOY_EXECUTE_FANOUT', 1, env);
+}
 
 /**
  * Jobs this worker processes simultaneously.

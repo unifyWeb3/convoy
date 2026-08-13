@@ -15,6 +15,12 @@ for (const l of readFileSync(new URL('../../../.env', import.meta.url), 'utf8').
 }
 
 const RPC = process.env.BASE_RPC_URL;
+const { KhClient, getExecutionStatus } = await import('@convoy/kh-client');
+const khClient = new KhClient({
+  apiKey: process.env.KEEPERHUB_API_KEY,
+  baseUrl: process.env.KEEPERHUB_BASE_URL,
+  chainId: '84532',
+});
 const rpc = async (method, params) =>
   (
     await (
@@ -26,13 +32,6 @@ const rpc = async (method, params) =>
     ).json()
   ).result;
 
-const kh = async (id) =>
-  await (
-    await fetch(`${process.env.KEEPERHUB_BASE_URL}/api/execute/${id}/status`, {
-      headers: { Authorization: `Bearer ${process.env.KEEPERHUB_API_KEY}` },
-    })
-  ).json();
-
 // executionId -> expectation, from the sponsorship probe.
 const CASES = [
   ['e9vdaxkipq90kvt3jqgn7', 'UNSPONSORED (org wallet paid, DEC-006 nonce 1)'],
@@ -41,7 +40,7 @@ const CASES = [
 ];
 
 for (const [id, label] of CASES) {
-  const body = await kh(id);
+  const body = await getExecutionStatus(khClient, id);
   const r = await rpc('eth_getTransactionReceipt', [body.transactionHash]);
   const gasUsed = BigInt(r.gasUsed);
   const price = BigInt(r.effectiveGasPrice);

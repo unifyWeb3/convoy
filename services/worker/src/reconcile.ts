@@ -38,7 +38,6 @@ export interface PersistedAttempt {
 
 export type ExecutionObservation =
   | { readonly outcome: 'landed'; readonly status: StatusResult; readonly txHash: string }
-  | { readonly outcome: 'retry'; readonly status: StatusResult; readonly code: string }
   | {
       readonly outcome: 'failed';
       readonly status: StatusResult;
@@ -159,37 +158,71 @@ export async function persistObservation(
   attemptId: string,
   observation: ExecutionObservation,
   fields: {
+    readonly runId?: string;
     readonly gasUsedWei?: Prisma.Decimal | null;
     readonly gasUsedUsdc?: Prisma.Decimal | null;
     readonly sponsored?: boolean | null;
   } = {},
-): Promise<void> {
+): Promise<boolean> {
   const status = observation.status;
+  const auditData = {
+    executionId: status.executionId,
+    khStatus: status.status,
+    txHash:
+      status.transactionHash === undefined
+        ? null
+        : Buffer.from(status.transactionHash.slice(2), 'hex'),
+    txLink: status.transactionLink ?? null,
+    errorCode: observation.outcome === 'failed' ? (observation.code ?? null) : null,
+    revertReason: observation.outcome === 'failed' ? observation.reason : null,
+    ...(fields.sponsored === undefined ? {} : { sponsored: fields.sponsored }),
+  };
+  if (
+    fields.runId !== undefined &&
+    fields.gasUsedUsdc !== undefined &&
+    fields.gasUsedUsdc !== null
+  ) {
+    const gasUsedUsdc = fields.gasUsedUsdc;
+    return await prisma.$transaction(async (tx) => {
+      // The conditional update is the accounting claim. PostgreSQL locks the
+      // matching attempt row; concurrent reconciliation callers therefore
+      // produce one winner (count=1) and all others observe count=0 after it
+      // commits. No read-then-write race and no schema marker is required.
+      const claimed = await tx.attempt.updateMany({
+        where: { id: attemptId, gasUsedUsdc: null },
+        data: {
+          ...auditData,
+          ...(fields.gasUsedWei === undefined ? {} : { gasUsedWei: fields.gasUsedWei }),
+          gasUsedUsdc,
+        },
+      });
+      if (claimed.count === 1) {
+        await tx.run.update({
+          where: { id: fields.runId },
+          // DEC-010: the persisted run meter records consumption only.
+          // spentPayUsdc is reserved for the future x402/pay leg.
+          data: { spentGasUsdc: { increment: gasUsedUsdc } },
+        });
+      } else {
+        // Preserve the latest terminal audit fields without touching the gas
+        // columns already claimed by the winner.
+        await tx.attempt.update({ where: { id: attemptId }, data: auditData });
+      }
+      return claimed.count === 1;
+    });
+  }
   const update = (prisma.attempt as unknown as { update?: (args: unknown) => Promise<unknown> })
     .update;
-  if (update === undefined) return;
+  if (update === undefined) return false;
   await update({
     where: { id: attemptId },
     data: {
-      executionId: status.executionId,
-      khStatus: status.status,
-      txHash:
-        status.transactionHash === undefined
-          ? null
-          : Buffer.from(status.transactionHash.slice(2), 'hex'),
-      txLink: status.transactionLink ?? null,
-      errorCode:
-        observation.outcome === 'retry'
-          ? observation.code
-          : observation.outcome === 'failed'
-            ? (observation.code ?? null)
-            : null,
-      revertReason: observation.outcome === 'failed' ? observation.reason : null,
+      ...auditData,
       ...(fields.gasUsedWei === undefined ? {} : { gasUsedWei: fields.gasUsedWei }),
       ...(fields.gasUsedUsdc === undefined ? {} : { gasUsedUsdc: fields.gasUsedUsdc }),
-      ...(fields.sponsored === undefined ? {} : { sponsored: fields.sponsored }),
     },
   });
+  return false;
 }
 
 /** Record a submission failure that produced no execution id. */
@@ -232,9 +265,7 @@ export async function pollPersistedExecution(
     ...(attempt.txLink === null || attempt.txLink === undefined
       ? {}
       : { transactionLink: attempt.txLink }),
-    terminal:
-      attempt.txHash !== null &&
-      (attempt.khStatus === 'completed' || attempt.khStatus === 'failed'),
+    terminal: attempt.txHash !== null && attempt.khStatus === 'completed',
     httpStatus: 202,
     raw: null,
   };
@@ -256,11 +287,15 @@ export function classifyExecutionStatus(status: StatusResult): ExecutionObservat
 
   if (status.status === 'failed') {
     const code = transientRunErrorCode(status.raw);
-    if (code !== undefined) return { outcome: 'retry', status, code };
     return {
       outcome: 'failed',
       status,
-      reason: failureMessage(status.raw) ?? 'KeeperHub execution failed without a transient code',
+      reason:
+        failureMessage(status.raw) ??
+        (code === undefined
+          ? 'KeeperHub execution failed without a transient code'
+          : `KeeperHub terminal execution failed after internal retry code ${code}`),
+      ...(code === undefined ? {} : { code }),
     };
   }
 

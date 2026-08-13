@@ -22,11 +22,11 @@ jobs:
   # that documentation, .env.example and CLAUDE.md — which legitimately name
   # app.keeperhub.com and PRIVATE_KEY — do not cause false failures.
   #
-  # Build output (out/, dist/) is excluded too. This job checks out a clean tree
+  # Build output (out/, dist/, .next/) is excluded too. This job checks out a clean tree
   # so CI never sees those directories, but the same commands are meant to be
   # run locally by a reviewer, and locally they DO exist: compiling Deploy.s.sol
-  # emits packages/contracts/out/Deploy.s.sol/Deploy.json, which contains the
-  # string PRIVATE_KEY and tripped the key guard (CVY-002, gap G-15). A guard
+  # emits packages/contracts/out/Deploy.s.sol/Deploy.json and Next emits bundled
+  # provider strings under apps/web/.next (gap G-15). A guard
   # that cries wolf locally is a guard reviewers learn to ignore.
   # The same commands are mirrored in .convoy/checklists/review.md.
   # ---------------------------------------------------------------------------
@@ -41,7 +41,7 @@ jobs:
           set -o pipefail
           hits=$(grep -rn "app\.keeperhub\.com" apps packages services scripts \
                    --include='*.ts' --include='*.tsx' --include='*.js' --include='*.mjs' \
-                   --exclude-dir=out --exclude-dir=dist --exclude-dir=node_modules \
+                   --exclude-dir=out --exclude-dir=dist --exclude-dir=.next --exclude-dir=node_modules \
                    2>/dev/null | grep -v '^packages/kh-client/' || true)
           if [ -n "$hits" ]; then
             echo "::error::KeeperHub must only be reached from packages/kh-client."
@@ -67,7 +67,7 @@ jobs:
         run: |
           set -o pipefail
           hits=$(grep -rln "PRIVATE_KEY" apps packages services scripts \
-                   --exclude-dir=out --exclude-dir=dist --exclude-dir=node_modules \
+                   --exclude-dir=out --exclude-dir=dist --exclude-dir=.next --exclude-dir=node_modules \
                    2>/dev/null | grep -v '^packages/contracts/script/' || true)
           if [ -n "$hits" ]; then
             echo "::error::PRIVATE_KEY may only be referenced under packages/contracts/script."
@@ -82,7 +82,7 @@ jobs:
           hits=$(grep -rnE "mockRevert|fakeTxHash|stageFailure|injectGasSpike|throw new Error\(\"fake" \
                    apps packages services scripts \
                    --include='*.ts' --include='*.tsx' \
-                   --exclude-dir=out --exclude-dir=dist --exclude-dir=node_modules 2>/dev/null \
+                   --exclude-dir=out --exclude-dir=dist --exclude-dir=.next --exclude-dir=node_modules 2>/dev/null \
                    | grep -vE "(/test/|/tests/|/e2e/|/fixtures/|\.test\.|\.spec\.|__tests__)" || true)
           if [ -n "$hits" ]; then
             echo "::error::Convoy never stages a failure, injects a gas spike, or fakes a hash."
@@ -95,6 +95,32 @@ jobs:
     name: Lint, typecheck, build, test
     runs-on: ubuntu-latest
     needs: invariants
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/convoy_test
+      REDIS_URL: redis://localhost:6379
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: convoy_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d convoy_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -107,6 +133,12 @@ jobs:
 
       - name: Install
         run: pnpm install --frozen-lockfile
+
+      - name: Prepare test database
+        run: |
+          pnpm --filter @convoy/db db:generate
+          pnpm --filter @convoy/db db:deploy
+          pnpm --filter @convoy/db db:seed
 
       - name: Format check
         run: pnpm format:check

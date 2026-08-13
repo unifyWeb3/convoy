@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "chainId": "84532",
+  "budgetUsdc": "120.000000",
+  "target": {
+    "name": "RewardDistributor",
+    "addressEnv": "MOCK_DISTRIBUTOR_ADDR"
+  },
+  "items": [
+    {
+      "idx": 0,
+      "target": "RewardDistributor",
+      "functionName": "enableMarket",
+      "argTypes": ["uint256"],
+      "functionArgs": ["100"],
+      "evidence": "Open market 100 only after the late-claim top-up lands.",
+      "dependsOn": [4]
+    },
+    {
+      "idx": 1,
+      "target": "RewardDistributor",
+      "functionName": "fund",
+      "argTypes": ["uint256"],
+      "functionArgs": ["250000000"],
+      "evidence": "Fund 250 USDC after the epoch root is published.",
+      "dependsOn": [3]
+    },
+    {
+      "idx": 2,
+      "target": "RewardDistributor",
+      "functionName": "enableMarket",
+      "argTypes": ["uint256"],
+      "functionArgs": ["101"],
+      "evidence": "Open market 101 after funding lands.",
+      "dependsOn": [1]
+    },
+    {
+      "idx": 3,
+      "target": "RewardDistributor",
+      "functionName": "setRoot",
+      "argTypes": ["bytes32"],
+      "functionArgs": ["0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+      "evidence": "Publish the epoch Merkle root before any funding or market opening.",
+      "dependsOn": []
+    },
+    {
+      "idx": 4,
+      "target": "RewardDistributor",
+      "functionName": "fund",
+      "argTypes": ["uint256"],
+      "functionArgs": ["75000000"],
+      "evidence": "Top up 75 USDC after the root is published.",
+      "dependsOn": [3]
+    },
+    {
+      "idx": 5,
+      "target": "RewardDistributor",
+      "functionName": "enableMarket",
+      "argTypes": ["uint256"],
+      "functionArgs": ["101"],
+      "evidence": "Invalid duplicate of market 101; the contract should reject it.",
+      "dependsOn": [2],
+      "intendedInvalid": true
+    },
+    {
+      "idx": 6,
+      "target": "RewardDistributor",
+      "functionName": "setRoot",
+      "argTypes": ["bytes32"],
+      "functionArgs": ["0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+      "evidence": "Invalid second root submission; the contract should reject it.",
+      "dependsOn": [],
+      "intendedInvalid": true
+    },
+    {
+      "idx": 7,
+      "target": "RewardDistributor",
+      "functionName": "enableMarket",
+      "argTypes": ["uint256"],
+      "functionArgs": ["104"],
+      "evidence": "Open market 104 after funding lands.",
+      "dependsOn": [1]
+    },
+    {
+      "idx": 8,
+      "target": "RewardDistributor",
+      "functionName": "enableMarket",
+      "argTypes": ["uint256"],
+      "functionArgs": ["105"],
+      "evidence": "Open market 105 after funding lands.",
+      "dependsOn": [1]
+    },
+    {
+      "idx": 9,
+      "target": "RewardDistributor",
+      "functionName": "enableMarket",
+      "argTypes": ["uint256"],
+      "functionArgs": ["106"],
+      "evidence": "Open market 106 after funding lands.",
+      "dependsOn": [1]
+    },
+    {
+      "idx": 10,
+      "target": "RewardDistributor",
+      "functionName": "enableMarket",
+      "argTypes": ["uint256"],
+      "functionArgs": ["107"],
+      "evidence": "Open market 107 only after the duplicate-market audit action is accepted.",
+      "dependsOn": [5]
+    }
+  ]
+}

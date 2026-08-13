@@ -71,11 +71,10 @@ const REGISTRY_FNS = new Set(['openRun', 'commitAction', 'sealRun']);
 // The Critic port (CVY-011)
 // ---------------------------------------------------------------------------
 //
-// THE WORKER DOES NOT IMPORT THE CRITIC, for the same reason it does not import
-// the Planner (D-030): the Critic lives in `apps/web/lib/critic` per the frozen
-// file layout, and the worker compiles with `rootDir: src`. So the worker
-// declares the SHAPE it needs and the composition root supplies it — the port
-// below is structurally identical to what `critiqueAction` returns.
+// The worker depends on a narrow port rather than on the UI. The production
+// composition root supplies the existing Critic implementation through the
+// shared `@convoy/ai` package; tests and deterministic fallback callers can
+// provide the same shape without creating another execution rail.
 //
 // The direction of that dependency is also the honest one. A worker that
 // required an LLM to execute a run would stop when the provider did. With no
@@ -151,6 +150,21 @@ export interface OrchestratorDeps {
   readonly replan?: ReplanPort;
 }
 
+/** Production Planner composition; absent preserves the deterministic fallback. */
+export type PlannerPort = (input: {
+  readonly runId: string;
+  readonly budgetUsdc: string;
+  readonly deadline?: string;
+  readonly items: readonly {
+    readonly idx: number;
+    readonly target: string;
+    readonly functionName: string;
+    readonly functionArgs: readonly unknown[];
+    readonly evidence: string;
+    readonly dependsOn: readonly number[];
+  }[];
+}) => Promise<unknown>;
+
 function hexBytes(hex: string): Buffer {
   return Buffer.from(hex.replace(/^0x/, ''), 'hex');
 }
@@ -214,17 +228,19 @@ export async function transitionItem(args: {
   to: ItemState;
   type: EventType;
   payload: Prisma.InputJsonValue;
-  data?: Prisma.ItemUpdateInput;
+  data?: Prisma.ItemUpdateManyMutationInput;
 }): Promise<boolean> {
   const { runId, itemIdx, expect, to, type, payload } = args;
   return await prisma.$transaction(async (tx) => {
-    const item = await tx.item.findUnique({ where: { runId_idx: { runId, idx: itemIdx } } });
-    if (item === null) return false;
-    if (!expect.includes(item.state as ItemState)) return false;
-    await tx.item.update({
-      where: { runId_idx: { runId, idx: itemIdx } },
+    // Make the state guard the write predicate itself. A read followed by an
+    // unconditional update lets two concurrent reconcilers both observe the
+    // old state and both append the same lifecycle event after one blocks on
+    // the row. updateMany gives exactly one winner without a schema marker.
+    const moved = await tx.item.updateMany({
+      where: { runId, idx: itemIdx, state: { in: [...expect] } },
       data: { state: to, ...args.data },
     });
+    if (moved.count !== 1) return false;
     await tx.event.create({ data: { runId, itemIdx, type, payload } });
     return true;
   });
@@ -245,6 +261,20 @@ async function recordAttempt(
 // Phases
 // ---------------------------------------------------------------------------
 
+async function runWriteTxHash(
+  runId: string,
+  type: 'RUN_OPENED' | 'RUN_SEALED' | 'RUN_SEALED_PARTIAL',
+): Promise<string | undefined> {
+  const event = await prisma.event.findFirst({
+    where: { runId, itemIdx: null, type },
+    orderBy: { id: 'desc' },
+  });
+  const value = event?.payload;
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const txHash = (value as Record<string, unknown>)['txHash'];
+  return typeof txHash === 'string' ? txHash : undefined;
+}
+
 /** RECEIVED → OPENING → PLANNING. Lands `openRun` onchain. */
 export async function phaseOpen(
   deps: OrchestratorDeps,
@@ -253,20 +283,17 @@ export async function phaseOpen(
 ): Promise<string> {
   const log = deps.log ?? ((): void => {});
   const existing = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
+  if (existing.status === 'FAILED_FATAL') {
+    throw new Error(`run ${runId} is FAILED_FATAL; openRun will not be resubmitted`);
+  }
   if (
     ['PLANNING', 'CRITIQUING', 'EXECUTING', 'SEALING', 'SEALED_OK', 'SEALED_PARTIAL'].includes(
       existing.status,
     )
   ) {
-    const opened = await prisma.event.findFirst({
-      where: { runId, type: 'RUN_OPENED' },
-      orderBy: { id: 'asc' },
-    });
-    const txHash =
-      opened?.payload !== null && typeof opened?.payload === 'object'
-        ? (opened.payload as { txHash?: unknown }).txHash
-        : undefined;
-    if (typeof txHash === 'string') return txHash;
+    const txHash = await runWriteTxHash(runId, 'RUN_OPENED');
+    if (txHash !== undefined) return txHash;
+    throw new Error(`run ${runId} advanced without hash-backed RUN_OPENED proof`);
   }
   if (existing.runIdOnchain === null) {
     // Two stalled/re-picked lifecycle jobs may reach OPEN concurrently. The
@@ -303,27 +330,30 @@ export async function phaseOpen(
   const final = await pollUntilTerminal(deps.kh, write);
 
   if (final.status !== 'completed' || final.transactionHash === undefined) {
-    await setRunStatus(runId, 'FAILED_FATAL', 'RUN_SEALED_PARTIAL', {
-      reason: 'openRun did not land',
-      status: final.status,
-    });
+    await recordRunWrite(
+      runId,
+      'ITEM_FAILED',
+      'open',
+      final.executionId,
+      final,
+      existing.runEthUsd,
+      { reason: 'openRun did not land', status: final.status },
+      'FAILED_FATAL',
+    );
     throw new Error(`openRun did not land for run ${runId}`);
   }
 
-  await prisma.$transaction([
-    prisma.run.update({
-      where: { id: runId },
-      data: { status: 'PLANNING' },
-    }),
-    prisma.event.create({
-      data: {
-        runId,
-        itemIdx: null,
-        type: 'RUN_OPENED',
-        payload: { txHash: final.transactionHash, txLink: final.transactionLink ?? null },
-      },
-    }),
-  ]);
+  const openedRun = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
+  await recordRunWrite(
+    runId,
+    'RUN_OPENED',
+    'open',
+    final.executionId,
+    final,
+    openedRun.runEthUsd,
+    {},
+    'PLANNING',
+  );
   log(`RUN_OPENED ${final.transactionHash}`);
   return final.transactionHash;
 }
@@ -331,24 +361,93 @@ export async function phaseOpen(
 /**
  * PLANNING → CRITIQUING.
  *
- * **The worker does not call the Planner** (D-030). The Planner lives in
- * `apps/web/lib/planner` per the frozen file layout, and the worker compiles
- * with `rootDir: src` — a direct import fails with TS6059, measured. So the
- * boundary is the ledger, not a module: whoever creates the run writes the
- * validated plan to `runs.plan`, and this phase consumes it.
- *
- * That is also the honest dependency direction. The worker must not need an LLM
- * to execute a run; if it did, an unavailable model would stop execution rather
- * than degrading it.
- *
- * With no stored plan, the deterministic topological order from the declared
- * `dependsOn` edges is used — the same path as `--ablate-planner`.
+ * A configured Planner is called for a fresh run with no stored plan. If the
+ * port is absent or unavailable, the deterministic topological order from the
+ * declared `dependsOn` edges remains the safe fallback — the same structural
+ * path used when `--ablate-planner` is selected.
  */
-export async function phasePlan(runId: string): Promise<void> {
+export async function phasePlan(
+  runId: string,
+  options: {
+    readonly ablatePlanner?: boolean;
+    readonly planner?: PlannerPort;
+    readonly registryAddr?: string;
+  } = {},
+): Promise<void> {
   const run = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
   const items = await prisma.item.findMany({ where: { runId }, orderBy: { idx: 'asc' } });
 
-  const stored = readStoredPlan(run.plan);
+  let stored = readStoredPlan(run.plan);
+
+  if (options.ablatePlanner === true) {
+    const order = items.map((item) => item.idx);
+    const share = new Prisma.Decimal(run.budgetUsdc).div(Math.max(items.length, 1)).toFixed(6);
+    const declared = edgesFromItems(items);
+    const plan = {
+      source: 'ablation-planner',
+      order,
+      // Remove only Planner extraction. Operator-declared dependency gates
+      // remain authoritative in the ablation path.
+      deferrals: declared,
+      gasBudgetPerItem: items.map((item) => ({
+        idx: item.idx,
+        gasBudgetUsdc: item.gasBudgetUsdc?.toString() ?? share,
+      })),
+      warnings: ['CVY-016 planner ablation: input order; dependency extraction disabled'],
+      excludedIdx: [],
+    };
+    await prisma.$transaction([
+      prisma.run.update({
+        where: { id: runId },
+        data: { plan: plan as unknown as Prisma.InputJsonValue, status: 'CRITIQUING' },
+      }),
+      prisma.event.create({
+        data: {
+          runId,
+          itemIdx: null,
+          type: 'PLAN_READY',
+          payload: plan as unknown as Prisma.InputJsonValue,
+        },
+      }),
+    ]);
+    for (const item of items) {
+      await transitionItem({
+        runId,
+        itemIdx: item.idx,
+        expect: ['PENDING'],
+        to: item.dependsOn.length === 0 ? 'PLANNED' : 'DEFERRED',
+        type: 'PLAN_READY',
+        payload: { idx: item.idx, ablation: 'planner', dependsOn: item.dependsOn },
+        data: {
+          gasBudgetUsdc: item.gasBudgetUsdc ?? new Prisma.Decimal(share),
+        },
+      });
+    }
+    return;
+  }
+
+  let plannerFallbackReason: string | undefined;
+  if (stored === undefined && options.planner !== undefined) {
+    try {
+      const planned = await options.planner({
+        runId,
+        budgetUsdc: new Prisma.Decimal(run.budgetUsdc).toFixed(6),
+        ...(run.deadline === null ? {} : { deadline: run.deadline.toISOString() }),
+        items: items.map((item) => ({
+          idx: item.idx,
+          target: targetNameFromAddress(bytesToHex(item.targetAddr), options.registryAddr),
+          functionName: item.functionName,
+          functionArgs: item.functionArgs as readonly unknown[],
+          evidence: item.evidence,
+          dependsOn: item.dependsOn,
+        })),
+      });
+      stored = readStoredPlan(planned);
+      if (stored === undefined) throw new Error('Planner returned an invalid stored-plan shape');
+    } catch (error) {
+      plannerFallbackReason = error instanceof Error ? error.message : String(error);
+    }
+  }
 
   // THE DECLARED EDGES ARE AUTHORITATIVE. The Planner may ADD constraints it
   // read out of the evidence; it may never remove one the operator declared.
@@ -396,6 +495,9 @@ export async function phasePlan(runId: string): Promise<void> {
       ? {}
       : {
           gasBudgetPerItem: stored.gasBudgetPerItem,
+          rationalePerItem: stored.rationalePerItem,
+          attempts: stored.attempts,
+          ...(stored.model === undefined ? {} : { model: stored.model }),
           plannerDeferrals: plannerEdges,
           declaredDeferrals: declared,
         }),
@@ -406,6 +508,8 @@ export async function phasePlan(runId: string): Promise<void> {
       ...effectiveWarnings,
     ],
     excludedIdx: stored?.excludedIdx ?? [],
+    plannerFallback: stored?.source !== 'planner',
+    ...(plannerFallbackReason === undefined ? {} : { plannerFallbackReason }),
   };
 
   await prisma.$transaction([
@@ -501,9 +605,9 @@ export function unionEdges(a: readonly PlanEdge[], b: readonly PlanEdge[]): Plan
 /**
  * Find a cycle in an edge set, naming it.
  *
- * Duplicated from the Planner rather than imported, for the reason in D-030 —
- * the worker cannot reach `apps/web/lib`. Small, pure, and covered by its own
- * tests on both sides.
+ * Kept local as a small pure worker utility. The Planner package owns its own
+ * validation; this copy is used only to protect declared ledger edges when
+ * combining them with Planner-proposed deferrals.
  */
 export function findCycleEdges(edges: readonly PlanEdge[]): number[] | undefined {
   const adj = new Map<number, number[]>();
@@ -547,6 +651,9 @@ export interface StoredPlanShape {
   readonly gasBudgetPerItem: readonly { idx: number; gasBudgetUsdc: string }[];
   readonly excludedIdx: readonly number[];
   readonly warnings: readonly string[];
+  readonly rationalePerItem: readonly { idx: number; rationale: string }[];
+  readonly attempts: number;
+  readonly model?: string;
 }
 
 /**
@@ -579,6 +686,15 @@ export function readStoredPlan(value: unknown): StoredPlanShape | undefined {
       Number.isInteger((g as { idx?: unknown }).idx) &&
       typeof (g as { gasBudgetUsdc?: unknown }).gasBudgetUsdc === 'string',
   );
+  const rationalePerItem = (
+    Array.isArray(p['rationalePerItem']) ? p['rationalePerItem'] : []
+  ).filter(
+    (r): r is { idx: number; rationale: string } =>
+      r !== null &&
+      typeof r === 'object' &&
+      Number.isInteger((r as { idx?: unknown }).idx) &&
+      typeof (r as { rationale?: unknown }).rationale === 'string',
+  );
 
   return {
     source: p['source'],
@@ -591,6 +707,9 @@ export function readStoredPlan(value: unknown): StoredPlanShape | undefined {
     warnings: (Array.isArray(p['warnings']) ? p['warnings'] : []).filter(
       (w): w is string => typeof w === 'string',
     ),
+    rationalePerItem,
+    attempts: Number.isInteger(p['attempts']) ? (p['attempts'] as number) : 0,
+    ...(typeof p['model'] === 'string' ? { model: p['model'] } : {}),
   };
 }
 
@@ -610,6 +729,8 @@ export interface CritiqueVerdict {
 export interface CritiqueOptions {
   /** Read once per run rather than per item. Absent = projection is `unknown`. */
   readonly gasPriceWei?: bigint;
+  /** CVY-016 only: explicitly bypass the simulator and Critic for ablation. */
+  readonly bypassGate?: boolean;
 }
 
 /**
@@ -623,7 +744,8 @@ export interface CritiqueOptions {
  * would revert is overridden to VETO" — is structural here rather than
  * reconciled: an item the simulator rejects returns before the model is
  * consulted at all, which is the same outcome for no tokens. The override is
- * still implemented and unit-tested in `apps/web/lib/critic/corroborate.ts`,
+ * still implemented in `@convoy/ai/critic/corroborate` and exercised through
+ * the web compatibility tests,
  * where the eval exercises it with both verdicts in hand.
  *
  * The deterministic gate keeps its authority in full (D-029 unchanged): a
@@ -642,6 +764,31 @@ export async function critiqueItem(
   const item = await prisma.item.findUniqueOrThrow({
     where: { runId_idx: { runId, idx: itemIdx } },
   });
+
+  if (options.bypassGate === true) {
+    const moved = await transitionItem({
+      runId,
+      itemIdx,
+      expect: ['PLANNED', 'DEFERRED'],
+      to: 'SIMULATED',
+      type: 'ITEM_SIMULATED',
+      payload: {
+        ablation: 'critic',
+        gateBypassed: true,
+        simulate: 'not_run',
+        critic: 'not_consulted',
+        gasSpent: 0,
+      },
+    });
+    return {
+      idx: itemIdx,
+      approved: moved || item.state === 'SIMULATED',
+      reason: 'CVY-016 critic ablation: simulator/Critic gate bypassed',
+      decidedBy: 'ablation',
+      criticConsulted: false,
+      overrides: [],
+    };
+  }
 
   const sim = await simulateContractCall(deps.kh, {
     contractAddress: bytesToHex(item.targetAddr),
@@ -912,6 +1059,13 @@ function readRationale(plan: unknown, idx: number): string | undefined {
 /** Address → symbolic contract name. Anything unrecognised is named as such. */
 function targetName(deps: OrchestratorDeps, addr: string): string {
   if (addr.toLowerCase() === deps.registryAddr.toLowerCase()) return 'ConvoyRegistry';
+  return targetNameFromAddress(addr);
+}
+
+function targetNameFromAddress(addr: string, registryAddr?: string): string {
+  if (registryAddr !== undefined && addr.toLowerCase() === registryAddr.toLowerCase()) {
+    return 'ConvoyRegistry';
+  }
   const distributor = process.env['MOCK_DISTRIBUTOR_ADDR'];
   if (distributor !== undefined && addr.toLowerCase() === distributor.toLowerCase()) {
     return 'RewardDistributor';
@@ -926,6 +1080,8 @@ export interface CritiquePhaseResult {
   readonly failedIdx: readonly number[];
   readonly replanCycles: number;
   readonly notes: readonly string[];
+  /** True only when at least one item received an actual model verdict. */
+  readonly criticConsulted: boolean;
 }
 
 /**
@@ -952,6 +1108,31 @@ export async function phaseCritique(
 ): Promise<CritiquePhaseResult> {
   const log = deps.log ?? ((): void => {});
   const notes: string[] = [];
+  const run = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
+
+  if (options.bypassGate === true) {
+    const planned = await prisma.item.findMany({
+      where: { runId, state: 'PLANNED' },
+      select: { idx: true },
+    });
+    const priority = plannerPriority(
+      run.plan,
+      planned.map((item) => item.idx),
+    );
+    const ready: number[] = [];
+    for (const idx of priority) {
+      const verdict = await critiqueItem(deps, runId, idx, budget, options);
+      if (verdict.approved) ready.push(idx);
+    }
+    return {
+      ready,
+      vetoed: [],
+      failedIdx: [],
+      replanCycles: 0,
+      notes: ['CVY-016 critic ablation: simulator and Critic bypassed'],
+      criticConsulted: false,
+    };
+  }
 
   const gasPriceWei = options.gasPriceWei ?? (await readGasPriceWei());
   if (gasPriceWei === undefined) {
@@ -982,7 +1163,12 @@ export async function phaseCritique(
     orderBy: { idx: 'asc' },
     select: { idx: true },
   });
-  const first = await critiqueSet(planned.map((p) => p.idx));
+  const priority = plannerPriority(
+    run.plan,
+    planned.map((item) => item.idx),
+  );
+  const first = await critiqueSet(priority);
+  let criticConsulted = first.some((v) => v.criticConsulted === true);
 
   const ready = first.filter((v) => v.approved).map((v) => v.idx);
   let vetoed = first.filter((v) => !v.approved);
@@ -1032,6 +1218,7 @@ export async function phaseCritique(
       }
 
       const second = await critiqueSet(reopened);
+      criticConsulted = criticConsulted || second.some((v) => v.criticConsulted === true);
       const stillVetoed = second.filter((v) => !v.approved);
       ready.push(...second.filter((v) => v.approved).map((v) => v.idx));
 
@@ -1058,8 +1245,12 @@ export async function phaseCritique(
     }
   }
 
-  ready.sort((a, b) => a - b);
-  return { ready, vetoed, failedIdx, replanCycles: cycles, notes };
+  const readyPriority = new Map(priority.map((idx, position) => [idx, position]));
+  ready.sort(
+    (left, right) =>
+      (readyPriority.get(left) ?? left) - (readyPriority.get(right) ?? right) || left - right,
+  );
+  return { ready, vetoed, failedIdx, replanCycles: cycles, notes, criticConsulted };
 }
 
 export interface ExecuteOutcome {
@@ -1077,6 +1268,8 @@ export interface ExecuteOutcome {
   readonly gasUsedUnits?: string;
   readonly gasPriceWei?: string;
   readonly retries: number;
+  /** Gas already added transactionally to the persisted run meter. */
+  readonly accounted?: boolean;
 }
 
 /**
@@ -1108,6 +1301,127 @@ async function composeFee(
   }
   return { fromReceipt: false, l1FeeIncluded: false };
 }
+
+async function observationGas(
+  final: WriteResult | Awaited<ReturnType<typeof pollPersistedExecution>>,
+  runEthUsd: Prisma.Decimal | string,
+): Promise<{
+  readonly fee: {
+    readonly weiTotal?: bigint;
+    readonly fromReceipt: boolean;
+    readonly l1FeeIncluded: boolean;
+  };
+  readonly consumedUsdc: Prisma.Decimal | null;
+  readonly sponsored: boolean | null;
+}> {
+  const fee =
+    final.transactionHash === undefined
+      ? { fromReceipt: false, l1FeeIncluded: false, weiTotal: undefined }
+      : await composeFee(final.transactionHash, {
+          ...(final.gasUsedUnits !== undefined ? { gasUsedUnits: final.gasUsedUnits } : {}),
+          ...(final.gasFeeWeiL2 !== undefined ? { gasFeeWeiL2: final.gasFeeWeiL2 } : {}),
+          ...(final.gasPriceWei !== undefined ? { gasPriceWei: final.gasPriceWei } : {}),
+        });
+  return {
+    fee,
+    consumedUsdc:
+      fee.weiTotal === undefined
+        ? null
+        : gasUsdc(new Prisma.Decimal(fee.weiTotal.toString()), runEthUsd),
+    sponsored: final.sponsored ?? null,
+  };
+}
+
+type RunWriteEvent = 'RUN_OPENED' | 'RUN_SEALED' | 'RUN_SEALED_PARTIAL' | 'ITEM_FAILED';
+
+function isSerializationFailure(error: unknown): boolean {
+  return (
+    error !== null && typeof error === 'object' && (error as { code?: unknown }).code === 'P2034'
+  );
+}
+
+async function recordRunWrite(
+  runId: string,
+  eventType: RunWriteEvent,
+  phase: 'open' | 'seal',
+  executionId: string,
+  final: WriteResult | Awaited<ReturnType<typeof pollPersistedExecution>>,
+  runEthUsd: Prisma.Decimal | string,
+  payload: Record<string, Prisma.InputJsonValue>,
+  status?: RunStatus,
+): Promise<{
+  readonly gas: Awaited<ReturnType<typeof observationGas>>;
+  readonly accounted: boolean;
+}> {
+  const gas = await observationGas(final, runEthUsd);
+  for (let transactionAttempt = 0; transactionAttempt < 3; transactionAttempt += 1) {
+    try {
+      const accounted = await prisma.$transaction(
+        async (tx) => {
+          // The serializable predicate read makes the event row the durable
+          // no-schema-change marker. Concurrent callers cannot both observe
+          // absence and commit an increment/event; one aborts and retries.
+          const prior = await tx.event.findMany({
+            where: { runId, itemIdx: null, type: eventType },
+            orderBy: { id: 'desc' },
+          });
+          const duplicate = prior.some((event) => {
+            const value = event.payload;
+            if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+            const object = value as Record<string, unknown>;
+            return object['phase'] === phase && object['executionId'] === executionId;
+          });
+          if (duplicate) return false;
+
+          await tx.run.update({
+            where: { id: runId },
+            data: {
+              ...(status === undefined
+                ? {}
+                : {
+                    status,
+                    ...(status.startsWith('SEALED') ? { sealedAt: new Date() } : {}),
+                  }),
+              ...(gas.consumedUsdc === null
+                ? {}
+                : { spentGasUsdc: { increment: gas.consumedUsdc } }),
+            },
+          });
+          await tx.event.create({
+            data: {
+              runId,
+              itemIdx: null,
+              type: eventType,
+              payload: {
+                ...payload,
+                phase,
+                executionId,
+                gasAccounted: gas.consumedUsdc !== null,
+                txHash: final.transactionHash ?? null,
+                txLink: final.transactionLink ?? null,
+                gasWeiTotal: gas.fee.weiTotal === undefined ? null : gas.fee.weiTotal.toString(),
+                gasUsdcConsumed: gas.consumedUsdc === null ? null : gas.consumedUsdc.toFixed(6),
+                feeFromReceipt: gas.fee.fromReceipt,
+                l1FeeIncluded: gas.fee.l1FeeIncluded,
+                sponsored: gas.sponsored,
+                retryCount: final.retryCount ?? null,
+              } as Prisma.InputJsonValue,
+            },
+          });
+          return gas.consumedUsdc !== null;
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+      return { gas, accounted };
+    } catch (error) {
+      if (transactionAttempt < 2 && isSerializationFailure(error)) continue;
+      throw error;
+    }
+  }
+  throw new Error('unreachable run-write accounting state');
+}
+
+export const __test = { observationGas, recordRunWrite };
 
 /**
  * COMMITTED → SUBMITTED → LANDED for one item.
@@ -1144,6 +1458,7 @@ export async function executeItem(
         : { feeWeiTotal: BigInt(prior.gasUsedWei.toString()) }),
       sponsored: prior?.sponsored ?? null,
       retries: prior?.attemptNo ?? 0,
+      accounted: prior?.gasUsedUsdc !== null && prior?.gasUsedUsdc !== undefined,
     };
   }
   if (['VETOED', 'FAILED', 'SKIPPED'].includes(item.state)) {
@@ -1161,27 +1476,9 @@ export async function executeItem(
   // and on restart poll its execution id (or reissue the same key when the id
   // was not durably recorded yet).
   if (item.state === 'SIMULATED') {
-    let commitAttempt = await latestAttempt(item.id, 'COMMIT');
-    let commitNo = commitAttempt?.attemptNo ?? 0;
+    const commitAttempt = await latestAttempt(item.id, 'COMMIT');
+    const commitNo = commitAttempt?.attemptNo ?? 0;
     for (;;) {
-      if (commitAttempt?.khStatus === 'failed' && commitAttempt.errorCode !== null) {
-        if (commitNo >= MAX_ONCHAIN_RETRIES) {
-          await transitionItem({
-            runId,
-            itemIdx,
-            expect: ['SIMULATED'],
-            to: 'FAILED',
-            type: 'ITEM_FAILED',
-            payload: {
-              reason: 'commitAction transient retry cap reached',
-              code: commitAttempt.errorCode,
-            },
-          });
-          return failedOutcome(itemIdx, commitNo);
-        }
-        commitNo += 1;
-        commitAttempt = undefined;
-      }
       const durable = commitAttempt ?? (await getOrCreateAttempt(item.id, commitNo, 'COMMIT'));
       try {
         let current = durable;
@@ -1200,7 +1497,16 @@ export async function executeItem(
         }
         const final = await pollPersistedExecution(deps.kh, current);
         const observation = classifyExecutionStatus(final);
-        await persistObservation(current.id, observation);
+        const commitGas = await observationGas(final, runEthUsd);
+        const commitAccounted = await persistObservation(current.id, observation, {
+          runId,
+          gasUsedWei:
+            commitGas.fee.weiTotal === undefined
+              ? undefined
+              : new Prisma.Decimal(commitGas.fee.weiTotal.toString()),
+          gasUsedUsdc: commitGas.consumedUsdc ?? undefined,
+          sponsored: commitGas.sponsored,
+        });
         if (observation.outcome === 'landed') {
           await transitionItem({
             runId,
@@ -1208,14 +1514,16 @@ export async function executeItem(
             expect: ['SIMULATED'],
             to: 'COMMITTED',
             type: 'ITEM_COMMITTED',
-            payload: { txHash: observation.txHash, executionId: final.executionId },
+            payload: {
+              txHash: observation.txHash,
+              executionId: final.executionId,
+              retryCount: final.retryCount ?? null,
+              gasUsdcConsumed:
+                commitGas.consumedUsdc === null ? null : commitGas.consumedUsdc.toFixed(6),
+              gasAccounted: commitAccounted,
+            },
           });
           break;
-        }
-        if (observation.outcome === 'retry' && commitNo < MAX_ONCHAIN_RETRIES) {
-          commitNo += 1;
-          commitAttempt = undefined;
-          continue;
         }
         await transitionItem({
           runId,
@@ -1231,11 +1539,9 @@ export async function executeItem(
                   txHash: null,
                 }
               : {
-                  reason:
-                    observation.outcome === 'retry'
-                      ? 'commitAction transient retry cap reached'
-                      : observation.reason,
-                  code: observation.outcome === 'retry' ? observation.code : null,
+                  reason: observation.reason,
+                  code: observation.code ?? null,
+                  retryCount: final.retryCount ?? null,
                 },
         });
         return failedOutcome(itemIdx, commitNo);
@@ -1250,13 +1556,7 @@ export async function executeItem(
             code: error.code,
             reason: error.message,
           });
-          if (commitNo < MAX_ONCHAIN_RETRIES) {
-            commitNo += 1;
-            commitAttempt = undefined;
-            continue;
-          }
-          await failSubmission(runId, itemIdx, durable, error, ['SIMULATED']);
-          return failedOutcome(itemIdx, commitNo);
+          throw error;
         }
         if (isUncertainSubmission(error)) throw error;
         await failSubmission(runId, itemIdx, durable, error, ['SIMULATED']);
@@ -1282,25 +1582,9 @@ export async function executeItem(
     abi: abiFor(item.functionName),
   };
 
-  let attempt = await latestAttempt(item.id, 'EXECUTE');
-  let attemptNo = attempt?.attemptNo ?? requestedAttempt;
+  const attempt = await latestAttempt(item.id, 'EXECUTE');
+  const attemptNo = attempt?.attemptNo ?? requestedAttempt;
   for (;;) {
-    if (attempt?.khStatus === 'failed' && attempt.errorCode !== null) {
-      if (attemptNo >= MAX_ONCHAIN_RETRIES) {
-        await transitionItem({
-          runId,
-          itemIdx,
-          expect: ['SUBMITTED', 'COMMITTED', 'RETRYING'],
-          to: 'FAILED',
-          type: 'ITEM_FAILED',
-          payload: { reason: 'transient retry cap reached', code: attempt.errorCode },
-        });
-        return failedOutcome(itemIdx, attemptNo);
-      }
-      attemptNo += 1;
-      attempt = undefined;
-    }
-
     const durable = attempt ?? (await getOrCreateAttempt(item.id, attemptNo, 'EXECUTE'));
     try {
       let current = durable;
@@ -1345,6 +1629,7 @@ export async function executeItem(
             ...gated,
             executionId: gated.executionId,
             status: gated.status ?? 'pending',
+            ...(gated.retryCount === undefined ? {} : { retryCount: gated.retryCount }),
           };
         }
         current = await persistExecutionId(current.id, write);
@@ -1371,23 +1656,14 @@ export async function executeItem(
       // `GET /status` is the record that carries `sponsored`; the write POST
       // often does not. Payer attribution therefore comes from the detail read,
       // falling back to the write only if the detail omitted it.
-      const sponsored = final.sponsored ?? null;
-      const fee =
-        final.transactionHash === undefined
-          ? { fromReceipt: false, l1FeeIncluded: false, weiTotal: undefined }
-          : await composeFee(final.transactionHash, {
-              ...(final.gasUsedUnits !== undefined ? { gasUsedUnits: final.gasUsedUnits } : {}),
-              ...(final.gasFeeWeiL2 !== undefined ? { gasFeeWeiL2: final.gasFeeWeiL2 } : {}),
-              ...(final.gasPriceWei !== undefined ? { gasPriceWei: final.gasPriceWei } : {}),
-            });
-      const consumedUsdc =
-        fee.weiTotal === undefined
-          ? null
-          : gasUsdc(new Prisma.Decimal(fee.weiTotal.toString()), runEthUsd);
+      const gas = await observationGas(final, runEthUsd);
+      const { fee, consumedUsdc, sponsored } = gas;
 
-      await persistObservation(current.id, observation, {
-        gasUsedWei: fee.weiTotal === undefined ? null : new Prisma.Decimal(fee.weiTotal.toString()),
-        gasUsedUsdc: consumedUsdc,
+      const accounted = await persistObservation(current.id, observation, {
+        runId,
+        gasUsedWei:
+          fee.weiTotal === undefined ? undefined : new Prisma.Decimal(fee.weiTotal.toString()),
+        gasUsedUsdc: consumedUsdc ?? undefined,
         sponsored,
       });
 
@@ -1412,6 +1688,7 @@ export async function executeItem(
                 : sponsored
                   ? '0.000000'
                   : consumedUsdc.toFixed(6),
+            retryCount: final.retryCount ?? null,
           },
         });
         return {
@@ -1425,21 +1702,8 @@ export async function executeItem(
           ...(final.gasUsedUnits === undefined ? {} : { gasUsedUnits: final.gasUsedUnits }),
           ...(final.gasPriceWei === undefined ? {} : { gasPriceWei: final.gasPriceWei }),
           retries: attemptNo,
+          accounted,
         };
-      }
-
-      if (observation.outcome === 'retry' && attemptNo < MAX_ONCHAIN_RETRIES) {
-        await transitionItem({
-          runId,
-          itemIdx,
-          expect: ['SUBMITTED', 'COMMITTED'],
-          to: 'RETRYING',
-          type: 'ITEM_RETRY',
-          payload: { attempt: attemptNo + 1, code: observation.code, observed: true },
-        });
-        attemptNo += 1;
-        attempt = undefined;
-        continue;
       }
 
       await transitionItem({
@@ -1449,12 +1713,17 @@ export async function executeItem(
         to: 'FAILED',
         type: 'ITEM_FAILED',
         payload: {
-          reason:
-            observation.outcome === 'retry' ? 'transient retry cap reached' : observation.reason,
-          code: observation.outcome === 'retry' ? observation.code : null,
+          reason: observation.reason,
+          code: observation.code ?? null,
+          retryCount: final.retryCount ?? null,
         },
       });
-      return failedOutcome(itemIdx, attemptNo, sponsored);
+      return failedOutcome(itemIdx, attemptNo, sponsored, {
+        ...(fee.weiTotal === undefined ? {} : { feeWeiTotal: fee.weiTotal }),
+        feeFromReceipt: fee.fromReceipt,
+        l1FeeIncluded: fee.l1FeeIncluded,
+        accounted,
+      });
     } catch (error) {
       if (
         error instanceof KhError &&
@@ -1466,25 +1735,7 @@ export async function executeItem(
           code: error.code,
           reason: error.message,
         });
-        if (attemptNo < MAX_ONCHAIN_RETRIES) {
-          await transitionItem({
-            runId,
-            itemIdx,
-            expect: ['SUBMITTED', 'COMMITTED', 'RETRYING'],
-            to: 'RETRYING',
-            type: 'ITEM_RETRY',
-            payload: { attempt: attemptNo + 1, code: error.code, observed: true },
-          });
-          attemptNo += 1;
-          attempt = undefined;
-          continue;
-        }
-        await failSubmission(runId, itemIdx, durable, error, [
-          'SUBMITTED',
-          'COMMITTED',
-          'RETRYING',
-        ]);
-        return failedOutcome(itemIdx, attemptNo);
+        throw error;
       }
       if (isUncertainSubmission(error)) throw error;
       await failSubmission(runId, itemIdx, durable, error, ['SUBMITTED', 'COMMITTED', 'RETRYING']);
@@ -1497,14 +1748,22 @@ function failedOutcome(
   idx: number,
   retries: number,
   sponsored: boolean | null = null,
+  fee: {
+    readonly feeWeiTotal?: bigint;
+    readonly feeFromReceipt?: boolean;
+    readonly l1FeeIncluded?: boolean;
+    readonly accounted?: boolean;
+  } = {},
 ): ExecuteOutcome {
   return {
     idx,
     landed: false,
-    feeFromReceipt: false,
-    l1FeeIncluded: false,
+    ...(fee.feeWeiTotal === undefined ? {} : { feeWeiTotal: fee.feeWeiTotal }),
+    feeFromReceipt: fee.feeFromReceipt ?? false,
+    l1FeeIncluded: fee.l1FeeIncluded ?? false,
     sponsored,
     retries,
+    ...(fee.accounted === undefined ? {} : { accounted: fee.accounted }),
   };
 }
 
@@ -1560,21 +1819,45 @@ export async function releaseDeferred(
   deps: OrchestratorDeps,
   runId: string,
   budget: BudgetState,
+  options: CritiqueOptions = {},
 ): Promise<number[]> {
-  const items = await prisma.item.findMany({ where: { runId }, orderBy: { idx: 'asc' } });
+  const [run, items] = await Promise.all([
+    prisma.run.findUniqueOrThrow({ where: { id: runId } }),
+    prisma.item.findMany({ where: { runId }, orderBy: { idx: 'asc' } }),
+  ]);
+  const order = plannerPriority(
+    run.plan,
+    items.map((item) => item.idx),
+  );
+  const priority = new Map(order.map((idx, position) => [idx, position]));
   const readyIdx = new Set(deferredItemsReadyForRelease(items));
-  const ready = items.filter((item) => readyIdx.has(item.idx));
+  const ready = items
+    .filter((item) => readyIdx.has(item.idx))
+    .sort(
+      (left, right) =>
+        (priority.get(left.idx) ?? left.idx) - (priority.get(right.idx) ?? right.idx) ||
+        left.idx - right.idx,
+    );
   if (ready.length === 0) return [];
 
   // A released item gets the SAME critique a first-wave item got — including the
   // Critic and the budget projection. Anything less would make the deferral gate
   // a way to bypass the gate that matters.
+  if (options.bypassGate === true) {
+    const released: number[] = [];
+    for (const item of ready) {
+      const v = await critiqueItem(deps, runId, item.idx, budget, options);
+      if (v.approved) released.push(item.idx);
+    }
+    return released;
+  }
+
   const gasPriceWei = await readGasPriceWei();
-  const options: CritiqueOptions = gasPriceWei === undefined ? {} : { gasPriceWei };
+  const critiqueOptions: CritiqueOptions = gasPriceWei === undefined ? {} : { gasPriceWei };
 
   const released: number[] = [];
   for (const item of ready) {
-    const v = await critiqueItem(deps, runId, item.idx, budget, options);
+    const v = await critiqueItem(deps, runId, item.idx, budget, critiqueOptions);
     if (v.approved) released.push(item.idx);
   }
   return released;
@@ -1593,6 +1876,22 @@ export function deferredItemsReadyForRelease(
     .map((item) => item.idx);
 }
 
+export function plannerPriority(plan: unknown, indices: readonly number[]): number[] {
+  const known = new Set(indices);
+  if (plan !== null && typeof plan === 'object' && !Array.isArray(plan)) {
+    const raw = (plan as Record<string, unknown>)['order'];
+    if (
+      Array.isArray(raw) &&
+      raw.length === indices.length &&
+      raw.every((idx) => Number.isInteger(idx) && known.has(idx as number)) &&
+      new Set(raw).size === raw.length
+    ) {
+      return raw as number[];
+    }
+  }
+  return [...indices].sort((left, right) => left - right);
+}
+
 /** SEALING → SEALED_OK | SEALED_PARTIAL. */
 export async function phaseSeal(
   deps: OrchestratorDeps,
@@ -1601,8 +1900,24 @@ export async function phaseSeal(
   budget: BudgetState,
 ): Promise<{ status: RunStatus; txHash?: string }> {
   const run = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
+  if (run.status === 'FAILED_FATAL') {
+    throw new Error(`run ${runId} is FAILED_FATAL; sealRun will not be resubmitted`);
+  }
+  if (run.status === 'SEALED_OK' || run.status === 'SEALED_PARTIAL') {
+    const txHash = await runWriteTxHash(
+      runId,
+      run.status === 'SEALED_OK' ? 'RUN_SEALED' : 'RUN_SEALED_PARTIAL',
+    );
+    if (txHash === undefined) {
+      throw new Error(`run ${runId} is ${run.status} without hash-backed seal proof`);
+    }
+    return { status: run.status, txHash };
+  }
   if (run.status !== 'SEALING') {
-    await setRunStatus(runId, 'SEALING', 'RUN_SEALED', { phase: 'sealing' });
+    // There is no frozen event type for an in-progress seal. Keep the status
+    // marker transactional; RUN_SEALED/RUN_SEALED_PARTIAL is reserved for the
+    // terminal, hash-backed proof below.
+    await prisma.run.update({ where: { id: runId }, data: { status: 'SEALING' } });
   }
 
   const items = await prisma.item.findMany({ where: { runId } });
@@ -1633,13 +1948,35 @@ export async function phaseSeal(
     { runId: keyRun(runId, 's'), idx: 0, attempt: 0 },
   );
   const final = await pollUntilTerminal(deps.kh, write);
+  if (final.status !== 'completed' || final.transactionHash === undefined) {
+    await recordRunWrite(
+      runId,
+      'ITEM_FAILED',
+      'seal',
+      final.executionId,
+      final,
+      run.runEthUsd,
+      { reason: 'sealRun did not land', status: final.status },
+      'FAILED_FATAL',
+    );
+    throw new Error(`sealRun did not land for run ${runId}`);
+  }
 
-  const status: RunStatus = unfinished.length > 0 ? 'SEALED_PARTIAL' : 'SEALED_OK';
-  await setRunStatus(runId, status, status === 'SEALED_OK' ? 'RUN_SEALED' : 'RUN_SEALED_PARTIAL', {
-    txHash: final.transactionHash ?? null,
-    txLink: final.transactionLink ?? null,
-    skipped: outcome.skippedIdx,
-    reason: outcome.reason,
-  });
+  const finalItems = await prisma.item.findMany({ where: { runId }, select: { state: true } });
+  const partial = finalItems.some((item) => item.state === 'FAILED' || item.state === 'SKIPPED');
+  const status: RunStatus = partial ? 'SEALED_PARTIAL' : 'SEALED_OK';
+  await recordRunWrite(
+    runId,
+    status === 'SEALED_OK' ? 'RUN_SEALED' : 'RUN_SEALED_PARTIAL',
+    'seal',
+    final.executionId,
+    final,
+    run.runEthUsd,
+    {
+      skipped: outcome.skippedIdx,
+      reason: partial ? 'one or more items failed or were skipped' : outcome.reason,
+    },
+    status,
+  );
   return { status, txHash: final.transactionHash };
 }

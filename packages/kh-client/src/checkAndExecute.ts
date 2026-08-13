@@ -119,6 +119,10 @@ export async function checkAndExecute(
     });
   }
   const status = s(b['status']);
+  const retryCount =
+    typeof b['retryCount'] === 'number' && Number.isInteger(b['retryCount']) && b['retryCount'] >= 0
+      ? b['retryCount']
+      : undefined;
 
   return {
     executed,
@@ -127,6 +131,7 @@ export async function checkAndExecute(
     condition,
     transactionHash: s(b['transactionHash']),
     transactionLink: s(b['transactionLink']),
+    ...(retryCount === undefined ? {} : { retryCount }),
     ...decodeReportedGas(b),
     terminal: status === undefined ? false : isTerminalStatus(status),
     httpStatus: response.httpStatus,

@@ -996,3 +996,204 @@ transaction hashes. The valid-hash proof (`octet_length(tx_hash)=32`) returned z
 across the database, and the acceptance-run-scoped query also returned zero rows. Historical rows
 were not rewritten to make the evidence look cleaner. CVY-015 is DONE; overall completion advances
 to 79%, and CVY-016 is next.
+
+## 2026-08-09 — CVY-016 offline harness implementation; live evidence pending
+
+Implemented the CVY-016 ablation harness without performing a Base Sepolia write. The committed
+fixture validates chain 84532, contiguous indices, argument shapes and an acyclic dependency graph.
+Baseline and critic modes preserve one plan; planner ablation uses literal input order and removes
+dependency extraction. Critic ablation is an explicit option on the existing `runBatch` lifecycle:
+it records an auditable `ITEM_SIMULATED` ablation event while bypassing simulate/Critic only for that
+mode. No second executor was created.
+
+Metrics are calculated from item states and persisted EXECUTE attempts/receipt fields: landed rate,
+failed/reverted items, failed executions with positive observed gas, budget consumed, invalid
+submissions and starved dependents. The README results remain "not measured — live authorization
+required". Offline CLI output reports 24 KeeperHub writes per 11-item run, plus one fresh distributor
+deployment per mode for equivalent initial state: 75 total live writes across three deployments and
+three runs.
+
+Focused deterministic verification passed 10/10 (five harness tests and five worker ablation/driver
+tests). Scripts and package typechecks, package lint, repository build and `git diff --check` passed.
+The first full worker attempt was blocked because PostgreSQL was unavailable at `localhost:5432`;
+after the local services were restored, worker passed 109/109 and the complete workspace test gate
+passed 359/359. The first `pnpm tsx` smoke was also blocked by the sandbox's temporary IPC-pipe
+permission and passed unchanged when rerun with permission for the offline command.
+
+Two live-evidence gaps remain. The existing distributor is stateful and cannot provide equivalent
+initial state, so three fresh deployments are required (G-45). Also, planner ablation retains the
+normal simulate gate; genuine out-of-order calls can therefore be vetoed at zero gas instead of
+producing the card's illustrative wasted-gas result (G-44). The measured result, not the expected
+number, will decide the README table after explicit authorization. CVY-016 remains TODO and overall
+completion remains 79%.
+
+## 2026-08-09 — CVY-016 review and pushed-history check correction
+
+Review reproduced the unsuccessful check associated with the last pushed CVY-015 history: the
+repository-wide `pnpm format:check` flagged `apps/web/test/api.stream.replay.test.ts` and
+`docs/milestones/CVY-011.md`. Both were pre-existing committed files; deterministic Prettier
+formatting cleared the check without changing behavior. The initial CVY-016 worker-suite failure
+was environmental — PostgreSQL was unavailable — not a test regression. With the configured local
+services available, worker passed 109/109 and the complete workspace test gate passed 359/359.
+
+The CI build job now provisions ephemeral PostgreSQL 16 and Redis 7, applies the checked-in Prisma
+migrations, and seeds the two deterministic ledger fixtures before `pnpm -r test`. The invariant
+grep-guards also exclude generated `.next` output, matching the existing `out`/`dist` exclusions;
+source-tree guard semantics are unchanged. No live ablation deployment or KeeperHub write was run.
+
+## 2026-08-09 — CVY-016 composition-boundary correction
+
+Review found the previous offline harness had not wired the real Planner/Critic into the normal
+queue lifecycle. The existing source implementation is now shared in `@convoy/ai`; the worker
+composition calls `planRun` and `critiqueAction`, passing both adapters into the single `runBatch`
+rail. When `OPENAI_API_KEY` is unavailable, both adapters remain active through the deterministic
+Planner and simulator-only Critic fallback, with fallback status recorded in the plan/event path
+and logged explicitly. Focused composition tests prove a Planner-sourced plan, `criticConsulted=true`,
+fallback flags, and the production lifecycle passing both ports to `runBatch`.
+
+No live KeeperHub write, contract deployment, ablation, or destructive database command was run.
+
+### 2026-08-09 — CVY-016 consultation accounting correction
+
+The production run event now records `criticConsulted` from actual per-item Critic verdicts,
+not merely from the presence of a configured port. A configured LLM lifecycle therefore records
+true only after a model verdict is returned; deterministic/simulator fallback and critic ablation
+remain explicitly false. Focused CVY-016 coverage is 15/15 after this correction. No live write,
+deployment, ablation, commit, or push was performed.
+
+## 2026-08-10 — CVY-016 pre-live P0 correction
+
+Applied the requested backend-only correction while keeping CVY-016 TODO and overall completion at
+79%. Successful seal events now require a terminal completed KeeperHub result with a real hash;
+failed/hashless seals are fatal without a successful seal event, FAILED/SKIPPED items produce
+`SEALED_PARTIAL`, and veto-only runs can still seal successfully. Receipt-backed gas is accounted
+for open, commit, target (including failed receipts) and seal writes exactly once, with gas consumed
+kept separate from wallet debit and missing figures left unknown.
+
+Terminal KeeperHub coded failures no longer create a new Convoy submission, attempt number or key.
+Existing same-key HTTP retries, idempotency-in-progress handling, uncertain-submit recovery and
+persisted-execution polling remain intact. KeeperHub `retryCount` is decoded through kh-client and
+included in existing audit/event payloads. Production fanout defaults to one; wider values require
+an explicit `CONVOY_EXECUTE_FANOUT` override. Planner order controls eligible selection while
+declared dependency gates remain authoritative.
+
+Registry reads sanitize provider errors, validate primary/fallback chain 84532, chunk event scans
+into at most ten blocks and deterministically deduplicate logs. The two diagnostic scripts now use
+the kh-client status boundary; raw Base RPC receipt reads remain where appropriate.
+
+Fresh focused evidence: worker correction selection 39/39, kh-client 131/131, web 88/88, package
+typechecks/lints and all four invariant guards passed. Full service-backed worker/DB tests were not
+reclaimed because local PostgreSQL/Redis were unavailable; prior service-backed evidence remains
+separate. No live write, deployment, migration, ablation, commit or push was performed.
+
+## 2026-08-10 — CVY-016 residual accounting and concurrency correction
+
+Corrected the unapproved pre-live pass without changing the frozen schema or execution rail.
+Receipt-backed gas now increments only `spentGasUsdc`; `spentPayUsdc` remains the reserved pay-leg
+field. `runBatch` reloads the durable budget immediately after open, after each execution wave and
+after seal, then derives wallet debit and unknown-payer counts from persisted attempt/event evidence
+instead of the budget columns.
+
+Failed hash-backed open and seal writes now retain execution ID, real hash, receipt gas,
+`retryCount` and sponsorship evidence in one `ITEM_FAILED` audit event, remain `FAILED_FATAL`, emit
+no success event and are not resubmitted on restart. Item gas claims use an atomic conditional
+attempt update; item lifecycle transitions use an atomic state predicate. Open/seal accounting and
+event creation use serializable transactions with conflict retry. Real PostgreSQL `Promise.all`
+tests prove exact-once gas/event behavior for item and run writes, including unavailable gas.
+
+The registry reader retains sanitized provider errors, Base Sepolia pinning, ten-block event ranges,
+deterministic deduplication and fallback-provider validation while restoring concrete viem event
+typing. Focused worker evidence passed 44/44; concurrent accounting passed 4/4. Fresh package
+evidence passed kh-client 131/131, worker 137/137, DB 35/35 and web 90/90. Repository typechecks,
+script typecheck, package/script lint, build, `git diff --check` and all four invariant guards passed.
+
+The default PostgreSQL and Redis ports were unavailable, so disposable services under `/tmp` on
+ports 55433 and 6380 were used after applying only the checked-in migrations and deterministic seed.
+The repository-wide Prettier check still reports only user-owned untracked `design/` handoff files;
+all repo-controlled CVY-016 files pass and the design directories were not modified. CVY-016 remains
+TODO at 79%; no live write, deployment, ablation, commit or push was performed.
+
+## 2026-08-10 — CVY-016 live acceptance started; baseline evidence rejected
+
+Live acceptance was authorised. Environment verification passed, KeeperHub and Base Sepolia were
+reachable, and three fresh `MockRewardDistributor` contracts were deployed. Two attempted baseline
+runs are preserved but excluded from acceptance: `ab700581-86ec-4c89-8e08-2687fbd8079e` degraded
+its Critic and later stopped on a transport failure; `5e33dacc-d06b-4fc2-b6fb-e233f5db1dae`
+recovered to `SEALED_PARTIAL` but persisted `source=fallback-topological` after an LLM timeout and
+recorded `criticConsulted=false`. The harness refused to emit a baseline artifact, so no ablation
+number was added to README.
+
+Provider probing then showed the replacement `OPENAI_API_KEY` is not accepted by the configured
+OpenRouter endpoint and is also rejected as invalid by OpenAI. The live harness now obtains and
+validates a real Planner result before creating the database run or calling KeeperHub, and retries
+transient timeouts as well as 429/fetch failures. This prevents another invalid AI configuration
+from consuming one-shot contract state. Focused harness tests passed 5/5, script typecheck passed,
+and the changed harness files pass Prettier. CVY-016 remains TODO at 79%; one fresh distributor is
+unused, two more will be required after valid Planner authentication is restored. No commit or push
+was performed.
+
+## 2026-08-11 — GenLayer simulation-only LlmCaller transport staged
+
+The external Responses credential path remains unavailable under the zero-spend constraint, so the
+existing Planner/Critic architecture is now backed by a second provider implementation rather than
+rewritten. Added the stateless `packages/ai/genlayer/convoy_inference.py` Intelligent Contract,
+which accepts only `convoy_plan` and `convoy_critic_verdict`, invokes
+`gl.nondet.exec_prompt(..., response_format="json")`, independently checks validator-side output
+shape, and returns canonical JSON without persistent inference state.
+
+Added `packages/ai/src/genlayer.ts` and `packages/ai/src/provider.ts`: the runtime creates the
+Bradbury client without an account, calls only `simulateWriteContract`, serializes the existing
+`StructuredRequest`, and preserves `LlmUnavailableError`, timeout and fallback semantics. Worker
+composition and the CVY-016 ablation harness use the same provider factory. The deployment-only
+operator helper and real-role, no-write preflight are present but have not been run against a new
+contract address.
+
+Focused evidence: `@convoy/ai` 20/20, worker production composition 3/3, kh-client 131/131, web
+90/90 and ablation harness 5/5. Repository typecheck, lint and build pass; Python syntax, focused
+formatting, `git diff --check`, Foundry formatting and all four invariant guards pass. Bradbury's
+accountless `getContractSchemaForCode` accepted the exact contract source and returned the single
+`infer` method on chain 4221. No GenLayer deployment, transaction, account, GEN funding, KeeperHub
+call, Base chain call, database write, or live CVY-016 ablation was performed. CVY-016 remains TODO
+pending deployment approval and fresh Planner/Critic preflight evidence.
+
+## 2026-08-11 — GenLayer deployment credential isolated
+
+Decoupled the deployment helper from every external repository and from Convoy's normal `.env`.
+Only the deployment-only `GENLAYER_DEPLOYMENT_KEY` is accepted, either from the invoking shell or
+from `packages/ai/genlayer/.env.deploy.local`. That file is explicitly gitignored and has a tracked
+placeholder template containing no secret. Runtime `genlayer.ts` and `provider.ts` do not import the
+deployment configuration, do not create an account and continue to expose only accountless
+`simulateWriteContract`.
+
+The helper reads the credential only long enough to create the one deployment account and prints
+only the resulting contract address and deployment transaction hash. Focused tests cover shell/file
+selection, runtime separation, gitignore coverage and secret-free errors. No credential was copied,
+printed, committed or read from `genlayer-jury`; no deployment or transaction was performed.
+
+## 2026-08-11 — CVY-016 live acceptance closed
+
+The GenLayer-backed Planner/Critic preflight passed, and the three authorized CVY-016 live runs
+completed on fresh Base Sepolia `MockRewardDistributor` contracts. The immutable artifacts are:
+
+- `docs/milestones/CVY-016-live-baseline.json` — run
+  `0d4bd5aa-1780-4ff0-ad35-fc8cdc236e4f`, 8/8 submitted items landed, `source=planner`,
+  `criticConsulted=true`, budget `0.030967 USDC`.
+- `docs/milestones/CVY-016-live-planner.json` — run
+  `72e9b3d9-5e8e-49b1-b9a4-49684cfd15a3`, Planner dependency extraction disabled, 1/1 submitted
+  item landed, genuine Critic retained, budget `0.006555 USDC`.
+- `docs/milestones/CVY-016-live-critic.json` — run
+  `f7243450-9aaa-49cf-97c3-fa0431dc7144`, exact baseline plan reused, Critic gate bypassed,
+  `criticConsulted=false`, 10 submitted and 8 landed, 2 invalid submissions.
+
+The two Critic-ablation invalid submissions were rejected by KeeperHub before target broadcast.
+They have no target transaction hash or receipt gas and are therefore recorded as **2 KeeperHub
+pre-broadcast rejections, 0 target-level onchain reverts and 0 wasted-gas events**. This is the
+measured outcome and is accepted for submission; the task card's target-revert/wasted-gas numbers
+were illustrative, not a reason to rerun or weaken the simulation gate.
+
+README, `docs/milestones/CVY-016.md`, `docs/IMPLEMENTATION_STATUS.md`, and `docs/KNOWN_GAPS.md`
+now point to the measured results and preserve all run IDs, onchain run IDs, distributor addresses,
+transaction hashes, and artifact references. The three JSON evidence artifacts were not modified.
+CVY-016 is DONE; no live experiment, deployment, database write, KeeperHub write, or chain operation
+was performed during this documentation closeout. Next priority is UI integration and final demo
+preparation.

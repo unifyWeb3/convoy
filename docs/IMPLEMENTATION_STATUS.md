@@ -1,6 +1,13 @@
-# Convoy Implementation Status (updated 2026-08-07)
+# Convoy Implementation Status (updated 2026-08-11)
 
-Overall: **79% (CVY-000…CVY-013 and CVY-015 done; GATE 1 and GATE 2 PASSED; DEC-001…DEC-010 applied)** Next milestone: **CVY-016 — ablation harness + README honesty table**
+Overall: **84% (CVY-000…CVY-013, CVY-015 and CVY-016 done; GATE 1 and GATE 2 PASSED; DEC-001…DEC-010 applied)**
+Next priority: **UI integration and final demo preparation (CVY-019 path)**
+
+CVY-016 is complete. The stateless GenLayer Bradbury contract is deployed and the accountless
+`simulateWriteContract` provider passed the genuine Planner/Critic preflight. Three fresh Base
+Sepolia runs now provide immutable, ledger-backed baseline, Planner-ablation and Critic-ablation
+evidence. The Critic result records two KeeperHub pre-broadcast rejections—not target-level onchain
+reverts or wasted gas—and is accepted as measured submission evidence.
 
 **The submission requirement is provisionally met.** Both contracts are deployed and
 Basescan-verified on Base Sepolia, and `openRun` landed through the org Turnkey wallet:
@@ -10,37 +17,37 @@ Addresses and evidence: [`docs/RUNBOOK_FIRST_TRANSACTION.md`](RUNBOOK_FIRST_TRAN
 **Execution chain: Base Sepolia (84532)** per DEC-001. Base mainnet (8453) is an optional final demo
 target at CVY-019, not the development target.
 
-| ID        | Milestone                                                   | Status     | %   | Notes                                                                                 |
-| --------- | ----------------------------------------------------------- | ---------- | --- | ------------------------------------------------------------------------------------- |
-| CVY-000   | Repo bootstrap + toolchain                                  | DONE       | 100 | Monorepo builds empty; `.convoy/` populated; CI grep-guards live                      |
-| CVY-001   | Contracts + Foundry unit/invariant tests                    | DONE       | 100 | 45 tests green; invariants at runs=1000 depth=32; gap G-10 recorded                   |
-| CVY-002   | payloadHash parity (Sol↔TS) + deploy script                 | DONE       | 100 | 13 dumped fixtures, 47 parity assertions; deploy script written, not run              |
-| DEC-001   | _Amendment_ — execution chain → Base Sepolia 84532          | DONE       | 100 | Not a milestone; a scoped spec amendment. See docs/DECISIONS.md                       |
-| CVY-004   | kh-client: write + simulate + status + errors + idempotency | DONE       | 100 | 114 tests; live smoke on 84532; drift G-20…G-23 recorded                              |
-| CVY-003   | Deploy+verify on Base Sepolia; **FIRST REAL BASE TX**       | DONE       | 100 | Both verified; openRun landed. D-019 closed, G-20 mitigated                           |
-| CVY-005   | DB package: Prisma schema, migrations, seed                 | DONE       | 100 | 5 frozen models; append-only events guard; 3- and 12-item fixtures seeded             |
-| CVY-006   | BullMQ queue + worker + idempotent handlers                 | DONE       | 100 | jobId dedupe, graceful SIGTERM; DEC-002 fan-out constant; gaps G-26/G-27              |
-| CVY-007   | Budget meter + gas→USDC accounting                          | DONE       | 100 | Pinned formula; BUDGET_LOW at 20%; payer split added at DEC-010                       |
-| CVY-008   | Orchestrator + RUN/ITEM state machine                       | DONE       | 100 | 3-item batch RECEIVED→SEALED_OK on 84532; DEC-006/007 measured; gap G-29              |
-| CVY-GATE1 | **GATE 1** — thin slice, real tx landed via Convoy          | **PASSED** | 100 | Called by the operator 2026-08-04                                                     |
-| CVY-009   | SSE timeline UI + audit drawer + replay                     | DONE       | 100 | 77 web tests; terminal status race fixed; browser E2E still unclaimed                 |
-| CVY-010   | Planner + zod schema + repair + eval                        | DONE       | 100 | Measured: JSON 29/29, recall 0.946, 0 cycles. D-030/031/032                           |
-| CVY-011   | Critic + simulate veto + corroboration                      | DONE       | 100 | 5/5 invalid vetoed, 5/5 valid approved, 0 false vetoes; G-34 mitigated                |
-| CVY-012   | Manifest exporter: 3-way reconcile + sha256                 | DONE       | 100 | 3-source rows; stable hash; cached JSON; copy/download; G-24 mitigated                |
-| CVY-013   | DAG view + deferral + onchain check-and-execute gate        | DONE       | 100 | Live DAG + browser E2E; atomic registry gate; G-35 mitigated                          |
-| CVY-GATE2 | **GATE 2** — full 12-item run, manifest, DAG                | **PASSED** | 100 | Serial-fanout constraint; honest amber manifest; G-40…G-43 recorded                   |
-| CVY-014   | Human approval gate                                         | TODO       | 0   | P1                                                                                    |
-| CVY-015   | Idempotency + crash-resume + kill-worker test               | DONE       | 100 | Real SIGKILL/restart retained the same execution ID/hash; zero duplicate valid hashes |
-| CVY-016   | Ablation harness + README honesty table                     | TODO       | 0   |                                                                                       |
-| CVY-017   | x402 payment leg                                            | TODO       | 0   | P1; gated on G-06, cuttable                                                           |
-| CVY-018   | Telegram notifications                                      | TODO       | 0   | P2; omit if time is short                                                             |
-| CVY-019   | Demo E2E + backup paths + video + SUBMIT                    | TODO       | 0   | Deadline Aug 13 2026 12:00 UTC+2; optional 8453 flip is a stretch step                |
+| ID        | Milestone                                                   | Status     | %   | Notes                                                                                                              |
+| --------- | ----------------------------------------------------------- | ---------- | --- | ------------------------------------------------------------------------------------------------------------------ |
+| CVY-000   | Repo bootstrap + toolchain                                  | DONE       | 100 | Monorepo builds empty; `.convoy/` populated; CI grep-guards live                                                   |
+| CVY-001   | Contracts + Foundry unit/invariant tests                    | DONE       | 100 | 45 tests green; invariants at runs=1000 depth=32; gap G-10 recorded                                                |
+| CVY-002   | payloadHash parity (Sol↔TS) + deploy script                 | DONE       | 100 | 13 dumped fixtures, 47 parity assertions; deploy script written, not run                                           |
+| DEC-001   | _Amendment_ — execution chain → Base Sepolia 84532          | DONE       | 100 | Not a milestone; a scoped spec amendment. See docs/DECISIONS.md                                                    |
+| CVY-004   | kh-client: write + simulate + status + errors + idempotency | DONE       | 100 | 114 tests; live smoke on 84532; drift G-20…G-23 recorded                                                           |
+| CVY-003   | Deploy+verify on Base Sepolia; **FIRST REAL BASE TX**       | DONE       | 100 | Both verified; openRun landed. D-019 closed, G-20 mitigated                                                        |
+| CVY-005   | DB package: Prisma schema, migrations, seed                 | DONE       | 100 | 5 frozen models; append-only events guard; 3- and 12-item fixtures seeded                                          |
+| CVY-006   | BullMQ queue + worker + idempotent handlers                 | DONE       | 100 | jobId dedupe, graceful SIGTERM; DEC-002 fan-out constant; gaps G-26/G-27                                           |
+| CVY-007   | Budget meter + gas→USDC accounting                          | DONE       | 100 | Pinned formula; BUDGET_LOW at 20%; payer split added at DEC-010                                                    |
+| CVY-008   | Orchestrator + RUN/ITEM state machine                       | DONE       | 100 | 3-item batch RECEIVED→SEALED_OK on 84532; DEC-006/007 measured; gap G-29                                           |
+| CVY-GATE1 | **GATE 1** — thin slice, real tx landed via Convoy          | **PASSED** | 100 | Called by the operator 2026-08-04                                                                                  |
+| CVY-009   | SSE timeline UI + audit drawer + replay                     | DONE       | 100 | 77 web tests; terminal status race fixed; browser E2E still unclaimed                                              |
+| CVY-010   | Planner + zod schema + repair + eval                        | DONE       | 100 | Measured: JSON 29/29, recall 0.946, 0 cycles. D-030/031/032                                                        |
+| CVY-011   | Critic + simulate veto + corroboration                      | DONE       | 100 | 5/5 invalid vetoed, 5/5 valid approved, 0 false vetoes; G-34 mitigated                                             |
+| CVY-012   | Manifest exporter: 3-way reconcile + sha256                 | DONE       | 100 | 3-source rows; stable hash; cached JSON; copy/download; G-24 mitigated                                             |
+| CVY-013   | DAG view + deferral + onchain check-and-execute gate        | DONE       | 100 | Live DAG + browser E2E; atomic registry gate; G-35 mitigated                                                       |
+| CVY-GATE2 | **GATE 2** — full 12-item run, manifest, DAG                | **PASSED** | 100 | Serial-fanout constraint; honest amber manifest; G-40…G-43 recorded                                                |
+| CVY-014   | Human approval gate                                         | TODO       | 0   | P1                                                                                                                 |
+| CVY-015   | Idempotency + crash-resume + kill-worker test               | DONE       | 100 | Real SIGKILL/restart retained the same execution ID/hash; zero duplicate valid hashes                              |
+| CVY-016   | Ablation harness + README honesty table                     | DONE       | 100 | Three accepted live runs; GenLayer Planner/Critic path; measured results documented in README and milestone report |
+| CVY-017   | x402 payment leg                                            | TODO       | 0   | P1; gated on G-06, cuttable                                                                                        |
+| CVY-018   | Telegram notifications                                      | TODO       | 0   | P2; omit if time is short                                                                                          |
+| CVY-019   | Demo E2E + backup paths + video + SUBMIT                    | TODO       | 0   | Next priority after UI integration; deadline Aug 13 2026 12:00 UTC+2; optional 8453 flip is a stretch step         |
 
 **Gates:** GATE1 **PASSED** 2026-08-04 · GATE2 **PASSED WITH OPERATIONAL CONSTRAINTS** 2026-08-07
 
 ## Critical path
 
-`002 → 004 → 003 → 008 → GATE1 → 012 → 009 → 013 → GATE2 → 015 → 019`
+`002 → 004 → 003 → 008 → GATE1 → 012 → 009 → 013 → GATE2 → 015 → 016 → 019`
 
 The first real Base transaction (CVY-003) is front-loaded so the hackathon submission requirement is
 provisionally met before any feature work — but it cannot precede CVY-004, because the transaction is
@@ -63,7 +70,7 @@ byte-identical across Solidity and TypeScript.
 **Updated 2026-08-03: the credential block is cleared.** `KEEPERHUB_API_KEY`, `BASE_RPC_URL`,
 `BASE_SEPOLIA_RPC_URL`, `BASE_RPC_URL_FALLBACK`, `ETHERSCAN_API_KEY` and `DEPLOYER_PRIVATE_KEY` are
 all present. CVY-003 is now gated on **CVY-004's write path**, which is engineering work rather than
-operator input. `OPENAI_API_KEY` was a placeholder at the time; it is now live (an OpenRouter key, D-031) and CVY-010 is complete.
+operator input. The historical CVY-010 evaluation used its recorded provider; current runtime Planner/Critic inference uses GenLayer and does not require `OPENAI_API_KEY`.
 
 ### Buffer exhausted, cut order live (recorded 2026-08-03 at DEC-001)
 
@@ -94,16 +101,19 @@ which is the one schedule pressure it was able to relieve.
 
 All values apply to **Base Sepolia (84532)** per DEC-001.
 
-| Value                   | Chain         | Status  | Notes                                                 |
-| ----------------------- | ------------- | ------- | ----------------------------------------------------- |
-| `KEEPERHUB_API_KEY`     | 84532         | PRESENT | org `kh_` key with the Turnkey wallet configured      |
-| `BASE_RPC_URL`          | 84532         | PRESENT | dedicated Sepolia RPC — never a public one            |
-| `BASE_SEPOLIA_RPC_URL`  | 84532         | PRESENT | Foundry `--rpc-url base_sepolia`; may be the same URL |
-| `BASE_RPC_URL_FALLBACK` | 84532         | PRESENT | demo backup path b; must match the primary chain      |
-| `ETHERSCAN_API_KEY`     | 84532 (+8453) | PRESENT | single Etherscan **V2** key; covers both chains       |
-| `DEPLOYER_PRIVATE_KEY`  | 84532         | PRESENT | Foundry deploy only; fund from a Sepolia faucet       |
-| `OPENAI_API_KEY`        | —             | LIVE    | OpenRouter key; needs `OPENAI_BASE_URL` (D-031)       |
-| `BASE_MAINNET_RPC_URL`  | 8453          | UNSET   | **optional**, CVY-019 flip only — leave unset         |
+| Value                      | Chain         | Status   | Notes                                                                       |
+| -------------------------- | ------------- | -------- | --------------------------------------------------------------------------- |
+| `KEEPERHUB_API_KEY`        | 84532         | PRESENT  | org `kh_` key with the Turnkey wallet configured                            |
+| `BASE_RPC_URL`             | 84532         | PRESENT  | dedicated Sepolia RPC — never a public one                                  |
+| `BASE_SEPOLIA_RPC_URL`     | 84532         | PRESENT  | Foundry `--rpc-url base_sepolia`; may be the same URL                       |
+| `BASE_RPC_URL_FALLBACK`    | 84532         | PRESENT  | demo backup path b; must match the primary chain                            |
+| `ETHERSCAN_API_KEY`        | 84532 (+8453) | PRESENT  | single Etherscan **V2** key; covers both chains                             |
+| `DEPLOYER_PRIVATE_KEY`     | 84532         | PRESENT  | Foundry deploy only; fund from a Sepolia faucet                             |
+| `CONVOY_LLM_PROVIDER`      | —             | ACTIVE   | `genlayer`; no OpenAI-compatible key required                               |
+| `CONVOY_GENLAYER_NETWORK`  | 4221          | ACTIVE   | `testnetBradbury`                                                           |
+| `CONVOY_GENLAYER_CONTRACT` | 4221          | PRESENT  | Deployed stateless inference contract; supplied through runtime environment |
+| `OPENAI_API_KEY`           | —             | OPTIONAL | Legacy `responses` provider only; unused by GenLayer                        |
+| `BASE_MAINNET_RPC_URL`     | 8453          | UNSET    | **optional**, CVY-019 flip only — leave unset                               |
 
 Presence is not the same as sufficiency: the org Turnkey wallet must also be **configured for 84532**
 and funded with Base Sepolia ETH. A `422 wallet-not-configured` from KeeperHub means that

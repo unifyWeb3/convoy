@@ -12,9 +12,15 @@ for (const l of readFileSync(new URL('../../../.env', import.meta.url), 'utf8').
   if (process.env[t.slice(0, i)] === undefined) process.env[t.slice(0, i)] = t.slice(i + 1).trim();
 }
 const { unsafeRawClient: prisma } = await import('@convoy/db');
+const { KhClient, getExecutionStatus } = await import('@convoy/kh-client');
 
 const ORG_WALLET = '0x65f5afd3'; // prefix match, case-insensitive
 const RPC = process.env.BASE_RPC_URL;
+const khClient = new KhClient({
+  apiKey: process.env.KEEPERHUB_API_KEY,
+  baseUrl: process.env.KEEPERHUB_BASE_URL,
+  chainId: '84532',
+});
 
 async function rpc(method, params) {
   const r = await fetch(RPC, {
@@ -54,20 +60,17 @@ console.log(JSON.stringify(orgPaid, null, 2));
 
 for (const o of orgPaid) {
   if (!o.executionId) continue;
-  const r = await fetch(`${process.env.KEEPERHUB_BASE_URL}/api/execute/${o.executionId}/status`, {
-    headers: { Authorization: `Bearer ${process.env.KEEPERHUB_API_KEY}` },
-  });
-  const body = await r.json();
-  console.log(`\n=== ORG-WALLET-PAID execution ${o.executionId} (HTTP ${r.status}) ===`);
+  const body = await getExecutionStatus(khClient, o.executionId);
+  console.log(`\n=== ORG-WALLET-PAID execution ${o.executionId} ===`);
   console.log(
     JSON.stringify(
       {
         sponsored: body.sponsored,
-        'result.sponsored': body.result?.sponsored,
-        'result.executedCall.sponsored': body.result?.executedCall?.sponsored,
-        gasUsedWei: body.gasUsedWei,
+        gasUsedUnits: body.gasUsedUnits,
+        gasFeeWeiL2: body.gasFeeWeiL2,
         gasPriceWei: body.gasPriceWei,
         transactionHash: body.transactionHash,
+        retryCount: body.retryCount,
       },
       null,
       2,
@@ -81,19 +84,14 @@ const control = attempts.find((a) => {
   return !orgPaid.some((o) => o.hash === h);
 });
 if (control?.executionId) {
-  const r = await fetch(
-    `${process.env.KEEPERHUB_BASE_URL}/api/execute/${control.executionId}/status`,
-    { headers: { Authorization: `Bearer ${process.env.KEEPERHUB_API_KEY}` } },
-  );
-  const body = await r.json();
-  console.log(`\n=== CONTROL relay-sent execution ${control.executionId} (HTTP ${r.status}) ===`);
+  const body = await getExecutionStatus(khClient, control.executionId);
+  console.log(`\n=== CONTROL relay-sent execution ${control.executionId} ===`);
   console.log(
     JSON.stringify(
       {
         sponsored: body.sponsored,
-        'result.sponsored': body.result?.sponsored,
-        'result.executedCall.sponsored': body.result?.executedCall?.sponsored,
         transactionHash: body.transactionHash,
+        retryCount: body.retryCount,
       },
       null,
       2,

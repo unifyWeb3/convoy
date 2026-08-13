@@ -73,22 +73,76 @@ that.
 
 ## Environment by surface
 
-| Surface                            | Needs                                                                                                                                                                                                                                           |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/web` (Vercel)                | `DATABASE_URL`, `REDIS_URL`, `KEEPERHUB_API_KEY`, `KEEPERHUB_BASE_URL`, `BASE_RPC_URL`, `BASE_RPC_URL_FALLBACK`, `CONVOY_REGISTRY_ADDR`, `MOCK_DISTRIBUTOR_ADDR`, `OPENAI_API_KEY`, `CONVOY_ETH_USD`, `CONVOY_LLM_TIMEOUT_MS`, `CONVOY_KH_MODE` |
-| `services/worker` (off Vercel)     | `DATABASE_URL`, `REDIS_URL`, `KEEPERHUB_API_KEY`, `KEEPERHUB_BASE_URL`, `BASE_RPC_URL`, `CONVOY_ETH_USD`, `CONVOY_KH_MODE`, optionally `TELEGRAM_BOT_TOKEN`                                                                                     |
-| `packages/contracts` (deploy only) | `DEPLOYER_PRIVATE_KEY`, `ETHERSCAN_API_KEY`, `BASE_SEPOLIA_RPC_URL`; `BASE_MAINNET_RPC_URL` only for the optional CVY-019 flip                                                                                                                  |
+| Surface                            | Needs                                                                                                                                                                                                                                                                                                       |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web` (Vercel)                | `DATABASE_URL`, `REDIS_URL`, `KEEPERHUB_API_KEY`, `KEEPERHUB_BASE_URL`, `BASE_RPC_URL`, `BASE_RPC_URL_FALLBACK`, `CONVOY_REGISTRY_ADDR`, `MOCK_DISTRIBUTOR_ADDR`, `CONVOY_LLM_PROVIDER`, `CONVOY_GENLAYER_NETWORK`, `CONVOY_GENLAYER_CONTRACT`, `CONVOY_ETH_USD`, `CONVOY_LLM_TIMEOUT_MS`, `CONVOY_KH_MODE` |
+| `services/worker` (off Vercel)     | `DATABASE_URL`, `REDIS_URL`, `KEEPERHUB_API_KEY`, `KEEPERHUB_BASE_URL`, `CONVOY_LLM_PROVIDER`, `CONVOY_GENLAYER_NETWORK`, `CONVOY_GENLAYER_CONTRACT`, `BASE_RPC_URL`, `CONVOY_ETH_USD`, `CONVOY_LLM_TIMEOUT_MS`, `CONVOY_KH_MODE`, optionally `TELEGRAM_BOT_TOKEN`                                          |
+| `packages/contracts` (deploy only) | `DEPLOYER_PRIVATE_KEY`, `ETHERSCAN_API_KEY`, `BASE_SEPOLIA_RPC_URL`; `BASE_MAINNET_RPC_URL` only for the optional CVY-019 flip                                                                                                                                                                              |
 
 `DEPLOYER_PRIVATE_KEY` is used **only** by `forge script` under `packages/contracts/script`. It never
 enters app or worker runtime — Convoy's runtime holds no private key, and a CI grep-guard enforces
 this.
 
+## GenLayer inference contract (deployment-gated)
+
+The source is [`packages/ai/genlayer/convoy_inference.py`](../packages/ai/genlayer/convoy_inference.py).
+It is stateless and exposes only `infer(schema_name, messages_json, schema_json)`. Runtime calls use
+`simulateWriteContract` on Testnet Bradbury (`chainId=4221`) and never use `writeContract`, an
+account, a signer, or a finality poll. The contract must be deployed once before setting
+`CONVOY_GENLAYER_CONTRACT`; until then the GenLayer provider intentionally reports unavailable and
+the existing deterministic/simulator-only fallbacks remain honest.
+
+Deployment is a separate operator action and is not part of Convoy runtime. Use a deployment-only
+Bradbury account with faucet GEN. The credential is accepted only as `GENLAYER_DEPLOYMENT_KEY` from
+the invoking shell or the gitignored `packages/ai/genlayer/.env.deploy.local` file. It is never read
+from Convoy's root `.env`, Vercel, the worker, or the `LlmCaller` provider.
+
+For the local-file path, copy the non-secret template and fill it locally without committing it:
+
+```bash
+cp packages/ai/genlayer/deploy.env.example packages/ai/genlayer/.env.deploy.local
+chmod 600 packages/ai/genlayer/.env.deploy.local
+```
+
+The file contains exactly:
+
+```env
+GENLAYER_DEPLOYMENT_KEY=0x...
+```
+
+Alternatively, export the same variable in the deployment shell. In either case, run from the
+repository root:
+
+```bash
+pnpm --filter @convoy/ai deploy:genlayer
+```
+
+The command prints `CONVOY_GENLAYER_CONTRACT=0x…` and the deployment transaction hash. It must be
+run only after the deployment-readiness report is reviewed and approved. It never prints the
+deployment credential.
+
+After recording the address, verify both real Convoy roles without any database or chain write:
+
+```bash
+CONVOY_LLM_PROVIDER=genlayer \
+CONVOY_GENLAYER_NETWORK=testnetBradbury \
+CONVOY_GENLAYER_CONTRACT=0x... \
+CONVOY_LLM_TIMEOUT_MS=30000 \
+pnpm --filter @convoy/ai preflight:genlayer
+```
+
+The preflight must report `planner.source="planner"`, a GenLayer-backed Critic model, and
+`writes=0`. Only after that evidence is accepted may CVY-016 resume.
+
 ## Vercel configuration note
 
 `vercel.json` lives at the repository root per the blueprint's tree, while the project's Root
 Directory is set to `apps/web` in the dashboard. Vercel reads `vercel.json` from the configured Root
-Directory, so **the dashboard settings are authoritative** (decision D-002). Deployment is git
-integration only.
+Directory, so **the dashboard settings are authoritative** (decision D-002). Set the dashboard
+Build Command to `pnpm --filter @convoy/web... build`: pnpm selects the web workspace and its
+workspace dependencies, then builds them in topological order before Next.js. The repository-root
+`vercel.json` mirrors that command for root-context verification. Deployment is git integration
+only.
 
 ## Worker topology
 

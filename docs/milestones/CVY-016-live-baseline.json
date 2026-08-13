@@ -1,0 +1,564 @@
+{
+  "mode": "baseline",
+  "chainId": "84532",
+  "distributorAddress": "0xCD3c0F6E5Eb8945C0A95bd8afED1b868CD57f567",
+  "runId": "0d4bd5aa-1780-4ff0-ad35-fc8cdc236e4f",
+  "runIdOnchain": "0x6b955b975daf601c80b3f73062ea71eecc337a29a525c7b8d63a16979cb8f32f",
+  "openTx": "0x21d13b1c491b1cb49dde650dd6aac51ea7a6a8bdc62635fd41e22a1c00def52f",
+  "sealTx": "0xdb7ac7b79d921c66cde96aa3fdf283d7139c814d4c9ed7c266eb74e13636a58c",
+  "criticConsulted": true,
+  "plan": {
+    "model": "genlayer/bradbury-consensus",
+    "order": [
+      3,
+      5,
+      6,
+      1,
+      4,
+      10,
+      0,
+      2,
+      7,
+      8,
+      9
+    ],
+    "source": "planner",
+    "attempts": 1,
+    "warnings": [
+      "order contradicted 1 deferral(s); re-derived topologically"
+    ],
+    "deferrals": [
+      {
+        "idx": 0,
+        "dependsOn": 4
+      },
+      {
+        "idx": 1,
+        "dependsOn": 3
+      },
+      {
+        "idx": 2,
+        "dependsOn": 1
+      },
+      {
+        "idx": 4,
+        "dependsOn": 3
+      },
+      {
+        "idx": 5,
+        "dependsOn": 2
+      },
+      {
+        "idx": 7,
+        "dependsOn": 1
+      },
+      {
+        "idx": 8,
+        "dependsOn": 1
+      },
+      {
+        "idx": 9,
+        "dependsOn": 1
+      },
+      {
+        "idx": 10,
+        "dependsOn": 5
+      }
+    ],
+    "excludedIdx": [],
+    "plannerFallback": false,
+    "gasBudgetPerItem": [
+      {
+        "idx": 0,
+        "gasBudgetUsdc": "10.000000"
+      },
+      {
+        "idx": 1,
+        "gasBudgetUsdc": "10.000000"
+      },
+      {
+        "idx": 2,
+        "gasBudgetUsdc": "10.000000"
+      },
+      {
+        "idx": 3,
+        "gasBudgetUsdc": "10.000000"
+      },
+      {
+        "idx": 4,
+        "gasBudgetUsdc": "10.000000"
+      },
+      {
+        "idx": 5,
+        "gasBudgetUsdc": "10.000000"
+      },
+      {
+        "idx": 6,
+        "gasBudgetUsdc": "10.000000"
+      },
+      {
+        "idx": 7,
+        "gasBudgetUsdc": "10.000000"
+      },
+      {
+        "idx": 8,
+        "gasBudgetUsdc": "10.000000"
+      },
+      {
+        "idx": 9,
+        "gasBudgetUsdc": "10.000000"
+      },
+      {
+        "idx": 10,
+        "gasBudgetUsdc": "10.000000"
+      }
+    ],
+    "plannerDeferrals": [
+      {
+        "idx": 4,
+        "dependsOn": 3
+      },
+      {
+        "idx": 1,
+        "dependsOn": 3
+      },
+      {
+        "idx": 2,
+        "dependsOn": 1
+      },
+      {
+        "idx": 7,
+        "dependsOn": 1
+      },
+      {
+        "idx": 8,
+        "dependsOn": 1
+      },
+      {
+        "idx": 9,
+        "dependsOn": 1
+      },
+      {
+        "idx": 0,
+        "dependsOn": 4
+      },
+      {
+        "idx": 10,
+        "dependsOn": 5
+      }
+    ],
+    "rationalePerItem": [
+      {
+        "idx": 0,
+        "rationale": "Enabled market 100 after the top-up (item 4) because evidence states it must wait for the late-claim top-up to land."
+      },
+      {
+        "idx": 1,
+        "rationale": "Funded 250 USDC after the root (item 3) because evidence states it must wait for the epoch root to be published."
+      },
+      {
+        "idx": 2,
+        "rationale": "Enabled market 101 after funding (item 1) because evidence states it must wait for funding to land."
+      },
+      {
+        "idx": 3,
+        "rationale": "Published the epoch Merkle root first because evidence states it must be done before any funding or market opening."
+      },
+      {
+        "idx": 4,
+        "rationale": "Topped up 75 USDC after the root (item 3) because evidence states it must wait for the root to be published."
+      },
+      {
+        "idx": 5,
+        "rationale": "Placed after legitimate market openings as it is an invalid duplicate that the contract should reject."
+      },
+      {
+        "idx": 6,
+        "rationale": "Placed last as it is an invalid second root submission that the contract should reject."
+      },
+      {
+        "idx": 7,
+        "rationale": "Enabled market 104 after funding (item 1) because evidence states it must wait for funding to land."
+      },
+      {
+        "idx": 8,
+        "rationale": "Enabled market 105 after funding (item 1) because evidence states it must wait for funding to land."
+      },
+      {
+        "idx": 9,
+        "rationale": "Enabled market 106 after funding (item 1) because evidence states it must wait for funding to land."
+      },
+      {
+        "idx": 10,
+        "rationale": "Enabled market 107 after the duplicate-market audit action (item 5) because evidence states it must wait for that action to be accepted."
+      }
+    ],
+    "declaredDeferrals": [
+      {
+        "idx": 0,
+        "dependsOn": 4
+      },
+      {
+        "idx": 1,
+        "dependsOn": 3
+      },
+      {
+        "idx": 2,
+        "dependsOn": 1
+      },
+      {
+        "idx": 4,
+        "dependsOn": 3
+      },
+      {
+        "idx": 5,
+        "dependsOn": 2
+      },
+      {
+        "idx": 7,
+        "dependsOn": 1
+      },
+      {
+        "idx": 8,
+        "dependsOn": 1
+      },
+      {
+        "idx": 9,
+        "dependsOn": 1
+      },
+      {
+        "idx": 10,
+        "dependsOn": 5
+      }
+    ]
+  },
+  "snapshot": {
+    "budgetUsdc": "120",
+    "spentGasUsdc": "0.030967",
+    "spentPayUsdc": "0",
+    "items": [
+      {
+        "idx": 0,
+        "state": "LANDED",
+        "dependsOn": [
+          4
+        ]
+      },
+      {
+        "idx": 1,
+        "state": "LANDED",
+        "dependsOn": [
+          3
+        ]
+      },
+      {
+        "idx": 2,
+        "state": "LANDED",
+        "dependsOn": [
+          1
+        ]
+      },
+      {
+        "idx": 3,
+        "state": "LANDED",
+        "dependsOn": []
+      },
+      {
+        "idx": 4,
+        "state": "LANDED",
+        "dependsOn": [
+          3
+        ]
+      },
+      {
+        "idx": 5,
+        "state": "VETOED",
+        "dependsOn": [
+          2
+        ],
+        "intendedInvalid": true
+      },
+      {
+        "idx": 6,
+        "state": "VETOED",
+        "dependsOn": [],
+        "intendedInvalid": true
+      },
+      {
+        "idx": 7,
+        "state": "LANDED",
+        "dependsOn": [
+          1
+        ]
+      },
+      {
+        "idx": 8,
+        "state": "LANDED",
+        "dependsOn": [
+          1
+        ]
+      },
+      {
+        "idx": 9,
+        "state": "LANDED",
+        "dependsOn": [
+          1
+        ]
+      },
+      {
+        "idx": 10,
+        "state": "DEFERRED",
+        "dependsOn": [
+          5
+        ]
+      }
+    ],
+    "attempts": [
+      {
+        "itemIdx": 3,
+        "kind": "SIMULATE",
+        "status": "200",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      },
+      {
+        "itemIdx": 6,
+        "kind": "SIMULATE",
+        "status": "200",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      },
+      {
+        "itemIdx": 3,
+        "kind": "COMMIT",
+        "status": "completed",
+        "txHash": "0xf0c3ecda11a1c4471260385f521b76cc4e281d822f1c8236194bf812161cbb5c",
+        "gasUsedWei": "714073513124",
+        "gasUsedUsdc": "0.002428",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 3,
+        "kind": "EXECUTE",
+        "status": "completed",
+        "txHash": "0x78184cdc2aa41559de5d70652c3c70004660f8f5b14debfb9d1f1f7e8f278173",
+        "gasUsedWei": "408123389963",
+        "gasUsedUsdc": "0.001388",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 1,
+        "kind": "SIMULATE",
+        "status": "200",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      },
+      {
+        "itemIdx": 4,
+        "kind": "SIMULATE",
+        "status": "200",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      },
+      {
+        "itemIdx": 1,
+        "kind": "COMMIT",
+        "status": "completed",
+        "txHash": "0x38ef2f932d3b8c3841d9f6507c96a2f52e892b711f7109325dea256ca6827284",
+        "gasUsedWei": "610665690768",
+        "gasUsedUsdc": "0.002076",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 1,
+        "kind": "EXECUTE",
+        "status": "completed",
+        "txHash": "0xb5480e331e225f01f0eda6c123ec36d26d78dc1ed220e6af669de31eee43ebce",
+        "gasUsedWei": "419524577731",
+        "gasUsedUsdc": "0.001426",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 4,
+        "kind": "COMMIT",
+        "status": "completed",
+        "txHash": "0x283755496a579abfb3fcd4b20675965c539412e4a884e4cba1ebbcc07a98a21a",
+        "gasUsedWei": "610950607990",
+        "gasUsedUsdc": "0.002077",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 4,
+        "kind": "EXECUTE",
+        "status": "completed",
+        "txHash": "0x4cf45d8d36408adb381305baa60d1d29430d47523bcd507190473cf5970e673d",
+        "gasUsedWei": "317067651495",
+        "gasUsedUsdc": "0.001078",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 0,
+        "kind": "SIMULATE",
+        "status": "200",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      },
+      {
+        "itemIdx": 2,
+        "kind": "SIMULATE",
+        "status": "200",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      },
+      {
+        "itemIdx": 7,
+        "kind": "SIMULATE",
+        "status": "200",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      },
+      {
+        "itemIdx": 8,
+        "kind": "SIMULATE",
+        "status": "200",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      },
+      {
+        "itemIdx": 9,
+        "kind": "SIMULATE",
+        "status": "200",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      },
+      {
+        "itemIdx": 0,
+        "kind": "COMMIT",
+        "status": "completed",
+        "txHash": "0xbfa656672bc39196aa4e0783240e8f2c6563f810ed559a5d37154cf855513dad",
+        "gasUsedWei": "610002902874",
+        "gasUsedUsdc": "0.002074",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 0,
+        "kind": "EXECUTE",
+        "status": "completed",
+        "txHash": "0x5d044b0e6eff8b565b294f23fe0323c08a4701ed89c4616a6e7f6b8b0a49f02e",
+        "gasUsedWei": "419623989522",
+        "gasUsedUsdc": "0.001427",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 2,
+        "kind": "COMMIT",
+        "status": "completed",
+        "txHash": "0x8837fc8fdcac457c7638e0ca50dc3f7fbd2f7ec88d5c39d5f18d65c3e844e607",
+        "gasUsedWei": "610302727013",
+        "gasUsedUsdc": "0.002075",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 2,
+        "kind": "EXECUTE",
+        "status": "completed",
+        "txHash": "0x018bd97b1b43635fed9770f71952234d21db6a924a42df1766a3ebb58ff26e20",
+        "gasUsedWei": "420201360740",
+        "gasUsedUsdc": "0.001429",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 7,
+        "kind": "COMMIT",
+        "status": "completed",
+        "txHash": "0xd0a6541cf83fb3c0fffe4d39ffc7aea05b39f93c1976cfb1a9ccd0e9cd0e9ad9",
+        "gasUsedWei": "611206930584",
+        "gasUsedUsdc": "0.002078",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 7,
+        "kind": "EXECUTE",
+        "status": "completed",
+        "txHash": "0x85ccb2e6faabe4586fec3fdc6f12e0a4da4aa93b5e8d6db103b0e7188bcd26b0",
+        "gasUsedWei": "420645118270",
+        "gasUsedUsdc": "0.00143",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 8,
+        "kind": "COMMIT",
+        "status": "completed",
+        "txHash": "0x7016bbb571bc0e315622b983e7849607830644832632a54c3147861e538cd745",
+        "gasUsedWei": "671284246311",
+        "gasUsedUsdc": "0.002282",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 8,
+        "kind": "EXECUTE",
+        "status": "completed",
+        "txHash": "0x1212af104026ee07c6282428f6d21bebe03fc82390f14fac6d05e718d194a0e8",
+        "gasUsedWei": "461595055730",
+        "gasUsedUsdc": "0.001569",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 9,
+        "kind": "COMMIT",
+        "status": "completed",
+        "txHash": "0x1efbfe381aed0ea002c57919352535139f0ed702befb425b78216495b4c63eb0",
+        "gasUsedWei": "610357676105",
+        "gasUsedUsdc": "0.002075",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 9,
+        "kind": "EXECUTE",
+        "status": "completed",
+        "txHash": "0x8cb69498f22ab22210f3376d91db7a22f7fce96ef162a2500f033bcf32193737",
+        "gasUsedWei": "419688001412",
+        "gasUsedUsdc": "0.001427",
+        "errorCode": null
+      },
+      {
+        "itemIdx": 5,
+        "kind": "SIMULATE",
+        "status": "400",
+        "txHash": null,
+        "gasUsedWei": null,
+        "gasUsedUsdc": null,
+        "errorCode": null
+      }
+    ]
+  },
+  "metrics": {
+    "landedItemRate": 1,
+    "landedItems": 8,
+    "submittedItems": 8,
+    "failedOrRevertedItems": 0,
+    "wastedGasEvents": 0,
+    "wastedGasUsdc": "0.000000",
+    "budgetSpentUsdc": "0.030967",
+    "invalidSubmissions": 0,
+    "starvedDependents": 1
+  }
+}

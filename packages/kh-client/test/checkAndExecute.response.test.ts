@@ -67,6 +67,7 @@ describe('check-and-execute', () => {
         status: 'completed',
         transactionHash: '0xdead',
         transactionLink: 'https://sepolia.basescan.org/tx/0xdead',
+        retryCount: 2,
         conditionResult: {
           met: true,
           observedValue: 'true',
@@ -83,6 +84,7 @@ describe('check-and-execute', () => {
       executionId: 'direct_gate_1',
       status: 'completed',
       terminal: true,
+      retryCount: 2,
       condition: { met: true, observedValue: 'true', targetValue: 'true', operator: 'eq' },
     });
   });

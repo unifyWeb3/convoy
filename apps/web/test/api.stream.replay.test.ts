@@ -70,9 +70,7 @@ describe('GET /api/runs/:id/stream', () => {
     mocks.readEventsAfter
       .mockResolvedValueOnce([event('8', 'RUN_SEALED', { phase: 'sealing' })])
       .mockResolvedValueOnce([event('9', 'RUN_SEALED_PARTIAL')]);
-    mocks.readRunStatus
-      .mockResolvedValueOnce('SEALING')
-      .mockResolvedValueOnce('SEALED_PARTIAL');
+    mocks.readRunStatus.mockResolvedValueOnce('SEALING').mockResolvedValueOnce('SEALED_PARTIAL');
 
     const response = await GET(
       new Request('http://convoy.test/api/runs/run-1/stream', {

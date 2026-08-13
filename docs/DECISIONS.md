@@ -329,18 +329,16 @@ architecture wins and the card is the thing that is wrong.
 
   | Constant             | Where                           | Env override                | Default |
   | -------------------- | ------------------------------- | --------------------------- | ------- |
-  | `EXECUTE_FANOUT`     | `services/worker/src/config.ts` | `CONVOY_EXECUTE_FANOUT`     | `4`     |
+  | `EXECUTE_FANOUT`     | `services/worker/src/config.ts` | `CONVOY_EXECUTE_FANOUT`     | `1`     |
   | `WORKER_CONCURRENCY` | `services/worker/src/config.ts` | `CONVOY_WORKER_CONCURRENCY` | `4`     |
 
   `WORKER_CONCURRENCY` is clamped to at least `EXECUTE_FANOUT`: a worker that processes fewer jobs
   at once than the fan-out asks for silently re-serializes the dispatch, which is exactly the bug
   this decision exists to prevent.
 
-**The default of 4 is provisional and is chosen properly at CVY-008**, where the EXECUTE phase
-actually exists and the number can be measured against a real 12-item batch. 4 is enough to produce
-genuine nonce contention and small enough to stay clear of the observed KeeperHub rate limit
-(`x-ratelimit-limit: 60`). CVY-006 ships the constant and the plumbing; it does not ship a tuned
-value, because there is nothing yet to tune it against.
+**Historical note:** 4 was the provisional measurement value at CVY-006/CVY-008. G-40 later recorded
+real KeeperHub `InvalidNonce()` target failures at fanout 4, so the safe canonical default is now 1.
+Wider fanout remains an explicit measurement/rehearsal override.
 
 **DEC-003 2026-08-04: the idempotency attempt number is fixed in the job payload at enqueue time,
 never derived at handler runtime.**
@@ -449,7 +447,11 @@ transaction**. The runbook's org-wallet funding threshold is **load-bearing, not
 keeping it was correct for a better reason than the one recorded at CVY-007. G-08's "never
 load-bearing" stands and is now doubly justified.
 
-**DEC-007 2026-08-04: `EXECUTE_FANOUT` stays at 4. Measured, no longer provisional.**
+**DEC-007 2026-08-04: historical fanout 4/12 throughput measurement.**
+
+This measurement does not claim current fanout-4 stability. G-40 subsequently found real
+`InvalidNonce()` failures at fanout 4; production now defaults to 1 and wider values are explicit
+measurement/rehearsal overrides.
 
 The same 12-item batch, twice:
 
@@ -689,3 +691,22 @@ Registry log reads are bounded by the ledger's real `RUN_OPENED` and `RUN_SEALED
 blocks. Scanning Base Sepolia from genesis is not a reliability strategy — ordinary dedicated RPCs
 cap log ranges. The ledger supplies only the range anchor; the emitting contract, operator,
 payloadHash, sequence, transaction hash and current registry storage all still come from chain.
+
+---
+
+**D-036 2026-08-11: GenLayer is an optional inference transport behind `LlmCaller`, using
+simulation only.**
+
+The blocked external Responses credential is not replaced by a second Convoy architecture. The
+existing Planner, Critic, Zod validation, repair, corroboration, fallback and audit paths remain
+unchanged. When `CONVOY_LLM_PROVIDER=genlayer`, the provider serializes the existing
+`StructuredRequest` and calls a stateless Intelligent Contract on Testnet Bradbury (`chainId=4221`)
+through `genlayer-js@1.1.8`'s `simulateWriteContract` method.
+
+The Convoy runtime supplies no GenLayer account, signer, private key, GEN funding or finality poll,
+and it never calls `writeContract`. The contract invokes `gl.nondet.exec_prompt(...,
+response_format="json")`, validates only the two frozen schema names, and returns canonical JSON;
+Convoy remains the authority for full Planner/Critic schema validation and safety corroboration.
+Deployment is a separate operator action and the contract address is configuration, not persisted
+in Convoy state. If Bradbury or the contract is unavailable, the existing deterministic Planner and
+simulator-only Critic fallback remains the honest behavior.

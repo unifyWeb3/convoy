@@ -6,7 +6,7 @@ import type { TimelineEvent, TimelineItem } from '../lib/events';
 function item(idx: number, dependsOn: readonly number[] = [], state = 'PLANNED'): TimelineItem {
   return {
     idx,
-    targetAddress: `0x${String(idx + 1).padStart(40, '0')}`,
+    targetAddress: `target-${idx}`,
     functionName: `action${idx}`,
     functionArgs: [],
     evidence: `evidence ${idx}`,
@@ -53,9 +53,15 @@ describe('DagView render model', () => {
     const submitted = graph.nodes.find((node) => node.id === '0');
     const landed = graph.nodes.find((node) => node.id === '1');
     expect(submitted?.data['label']).toContain('SUBMITTED');
-    expect(submitted?.style).toMatchObject({ background: '#eff6ff', border: '#3b82f6' });
+    expect(submitted?.style).toMatchObject({
+      background: 'var(--state-active-bg)',
+      border: 'var(--state-active-edge)',
+    });
     expect(landed?.data['label']).toContain('LANDED');
-    expect(landed?.style).toMatchObject({ background: '#ecfdf5', border: '#10b981' });
+    expect(landed?.style).toMatchObject({
+      background: 'var(--state-success-bg)',
+      border: 'var(--state-success-edge)',
+    });
   });
 
   it('keeps a budget-exhausted node visibly SKIPPED', () => {
@@ -65,7 +71,10 @@ describe('DagView render model', () => {
     };
     const graph = buildDagGraph([item(0, [], 'SKIPPED')], [skippedEvent]);
     expect(graph.nodes[0]?.data['label']).toContain('SKIPPED');
-    expect(graph.nodes[0]?.style).toMatchObject({ background: '#fffbeb', border: '#f59e0b' });
+    expect(graph.nodes[0]?.style).toMatchObject({
+      background: 'var(--state-partial-bg)',
+      border: 'var(--state-partial-edge)',
+    });
   });
 
   it('dashes and animates every still-blocked deferred edge', () => {
@@ -74,7 +83,10 @@ describe('DagView render model', () => {
     for (const edge of graph.edges) {
       expect(edge.animated).toBe(true);
       expect(edge.className).toBe('convoy-edge-deferred');
-      expect(edge.style).toMatchObject({ strokeDasharray: '7 5', stroke: '#f59e0b' });
+      expect(edge.style).toMatchObject({
+        strokeDasharray: '7 5',
+        stroke: 'var(--state-deferred-edge)',
+      });
     }
   });
 

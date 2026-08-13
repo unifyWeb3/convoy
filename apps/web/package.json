@@ -11,6 +11,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@convoy/ai": "workspace:*",
     "@convoy/db": "workspace:*",
     "@convoy/kh-client": "workspace:*",
     "@xyflow/react": "^12.11.2",

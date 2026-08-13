@@ -1,12 +1,14 @@
 import { expect, test } from '@playwright/test';
 
-const runId = process.env['CONVOY_E2E_RUN_ID'] ?? '00000000-0000-4000-8000-000000000003';
+const runId = process.env['CONVOY_E2E_RUN_ID'];
 
 test('refresh replays the database history and keeps streaming for later events', async ({
   page,
 }) => {
+  test.skip(runId === undefined, 'CONVOY_E2E_RUN_ID is required for a real replay run');
+  if (runId === undefined) return;
   await page.goto(`/runs/${runId}`);
-  const rows = page.getByRole('listitem');
+  const rows = page.locator('[aria-label="Run items"] [role="listitem"]');
   await expect(rows.first()).toBeVisible();
 
   const replay = await page.evaluate(
@@ -51,6 +53,6 @@ test('refresh replays the database history and keeps streaming for later events'
 
   const before = await rows.count();
   await page.reload();
-  await expect(page.getByRole('listitem')).toHaveCount(before);
+  await expect(page.locator('[aria-label="Run items"] [role="listitem"]')).toHaveCount(before);
   await expect(page.getByText('Execution timeline')).toBeVisible();
 });

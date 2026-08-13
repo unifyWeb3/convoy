@@ -62,8 +62,20 @@ vi.mock('@convoy/db', async (importOriginal) => {
   const tx = {
     item: {
       findUnique: vi.fn(async () => ledger.item),
-      update: vi.fn(async ({ data }: { data: Record<string, unknown> }) =>
-        Object.assign(ledger.item, data),
+      updateMany: vi.fn(
+        async ({
+          where,
+          data,
+        }: {
+          where: { idx: number; state: { in: string[] } };
+          data: Record<string, unknown>;
+        }) => {
+          if (where.idx !== ledger.item.idx || !where.state.in.includes(ledger.item.state)) {
+            return { count: 0 };
+          }
+          Object.assign(ledger.item, data);
+          return { count: 1 };
+        },
       ),
     },
     event: {
@@ -110,6 +122,7 @@ vi.mock('@convoy/db', async (importOriginal) => {
       item: {
         findUniqueOrThrow: vi.fn(async () => ledger.item),
         findUnique: vi.fn(async () => ledger.item),
+        updateMany: tx.item.updateMany,
       },
       attempt: tx.attempt,
       $transaction: vi.fn(async (work: unknown) =>

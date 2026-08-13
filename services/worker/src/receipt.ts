@@ -55,6 +55,16 @@ async function rpcReceipt(
   doFetch: typeof fetch,
   timeoutMs: number,
 ): Promise<Record<string, unknown> | undefined> {
+  const chainResponse = await doFetch(rpcUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!chainResponse.ok) return undefined;
+  const chainBody = (await chainResponse.json()) as { result?: unknown } | null;
+  if (rpcProviderChainId(chainBody?.result) !== 84532) return undefined;
+
   const response = await doFetch(rpcUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -80,6 +90,12 @@ function rpcUrls(override?: string): string[] {
       ? [override]
       : [process.env['BASE_RPC_URL'], process.env['BASE_RPC_URL_FALLBACK']]
   ).filter((u): u is string => u !== undefined && u !== '');
+}
+
+export function rpcProviderChainId(raw: unknown): number | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const parsed = Number.parseInt(raw, 16);
+  return Number.isInteger(parsed) ? parsed : undefined;
 }
 
 /**

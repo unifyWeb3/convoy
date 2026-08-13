@@ -1,0 +1,64 @@
+{
+  "name": "@convoy/ai",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./planner": {
+      "types": "./dist/planner/index.d.ts",
+      "default": "./dist/planner/index.js"
+    },
+    "./planner/llm": {
+      "types": "./dist/planner/llm.d.ts",
+      "default": "./dist/planner/llm.js"
+    },
+    "./planner/prompt": {
+      "types": "./dist/planner/prompt.d.ts",
+      "default": "./dist/planner/prompt.js"
+    },
+    "./planner/repair": {
+      "types": "./dist/planner/repair.d.ts",
+      "default": "./dist/planner/repair.js"
+    },
+    "./planner/schema": {
+      "types": "./dist/planner/schema.d.ts",
+      "default": "./dist/planner/schema.js"
+    },
+    "./genlayer": {
+      "types": "./dist/genlayer.d.ts",
+      "default": "./dist/genlayer.js"
+    },
+    "./provider": {
+      "types": "./dist/provider.d.ts",
+      "default": "./dist/provider.js"
+    },
+    "./critic": {
+      "types": "./dist/critic/index.d.ts",
+      "default": "./dist/critic/index.js"
+    },
+    "./critic/prompt": {
+      "types": "./dist/critic/prompt.d.ts",
+      "default": "./dist/critic/prompt.js"
+    },
+    "./critic/schema": {
+      "types": "./dist/critic/schema.d.ts",
+      "default": "./dist/critic/schema.js"
+    },
+    "./critic/corroborate": {
+      "types": "./dist/critic/corroborate.d.ts",
+      "default": "./dist/critic/corroborate.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.genlayer.json",
+    "lint": "eslint src genlayer --ext .ts --max-warnings 0 --no-error-on-unmatched-pattern",
+    "test": "vitest run --passWithNoTests",
+    "deploy:genlayer": "node --import tsx genlayer/deploy_convoy_inference.ts",
+    "preflight:genlayer": "node --import tsx genlayer/preflight_genlayer.ts"
+  },
+  "dependencies": {
+    "genlayer-js": "1.1.8",
+    "zod": "^3.25.76"
+  }
+}
