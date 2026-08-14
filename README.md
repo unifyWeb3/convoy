@@ -1,187 +1,337 @@
-# Convoy — autonomous onchain release operator
+# Convoy
 
-Convoy takes a batch of interdependent onchain operations, plans an execution DAG with an LLM
-Planner, has a separate LLM Critic veto steps that a real KeeperHub `simulate:true` dry-run shows
-would revert or overspend, executes the survivors through KeeperHub's org Turnkey wallet, recovers
-from genuine failures, and exports one replayable manifest.
+Convoy is an autonomous onchain release operator that plans, critically evaluates,
+dependency-orders, executes, and proves multi-step release workflows.
 
-Built for the KeeperHub **Agents Onchain** hackathon (DoraHacks). Chain: **Base Sepolia (84532)**
-(decision DEC-001). Base mainnet (8453) is an optional final demo target, not the build target.
+## What it solves
 
-> **Status:** CVY-003 complete — both contracts are **deployed and Basescan-verified** on Base
-> Sepolia, and the first real transaction has landed through KeeperHub's org Turnkey wallet:
-> [`0x1ffb4aaf…b2bbcd`](https://sepolia.basescan.org/tx/0x1ffb4aaf9525fd68b5d8eabe96d1e99058bbc40f9b0d7f7db102aa0d81b2bbcd).
-> Live status: [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md) ·
-> deploy runbook: [`docs/RUNBOOK_FIRST_TRANSACTION.md`](docs/RUNBOOK_FIRST_TRANSACTION.md).
+Multi-step onchain releases need more than transaction submission. Each action can depend on state
+created by an earlier action; an individually valid call can still be premature, unsupported by its
+evidence, or outside the run budget. Operators also need to know what was attempted, what actually
+landed, and whether the final record agrees with the execution rail and the chain.
 
----
+Convoy turns a batch of actions and supporting evidence into a dependency-aware execution plan,
+checks every eligible action, sends approved writes through one controlled rail, and reconciles the
+result into a receipt-backed proof manifest.
 
-## Honesty table
+## How it works
 
-Every reliability claim below maps to an artifact a judge can verify. Rows are filled in as
-milestones land — a row without an artifact link is not a claim Convoy makes.
+```text
+Planner
+  → dependency-aware plan
+  → Critic
+  → simulation / validation gate
+  → KeeperHub execution
+  → Base Sepolia
+  → receipts + registry events + Convoy ledger
+  → evidence-backed proof manifest
+```
 
-| Claim                                                   | How it is real                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Artifact                                                                                                                                                                                                                                                                      | Milestone         | Status   |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- | -------- |
-| Convoy executes real transactions on Base via KeeperHub | Every chain write is a KeeperHub direct-execution call through the org Turnkey wallet                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | [first openRun transaction](https://sepolia.basescan.org/tx/0x1ffb4aaf9525fd68b5d8eabe96d1e99058bbc40f9b0d7f7db102aa0d81b2bbcd)                                                                                                                                               | CVY-003           | ENFORCED |
-| The Critic's veto costs zero gas                        | Veto evidence is KeeperHub `simulate:true` (`estimateGas` + `provider.call`) — no signing, no broadcast, no audit row                                                                                                                                                                                                                                                                                                                                                                                                                                         | [`critic.veto.eval.ts`](tests/critic.veto.eval.ts) and [`CVY-011 report`](docs/milestones/CVY-011.md)                                                                                                                                                                         | CVY-011           | ENFORCED |
-| Convoy never sets a nonce                               | Convoy submits concurrently; **KeeperHub serializes onto a single sequential nonce** — strictly increasing, one transaction per block, never batched — measured identical at dispatch width 4 and 12. CI grep-guard bans `nonce:` in client/worker payloads                                                                                                                                                                                                                                                                                                   | [dispatch-width comparison](#dispatch-width-does-not-change-throughput) · `.github/workflows/ci.yml`                                                                                                                                                                          | CVY-000 / CVY-008 | ENFORCED |
-| Convoy never holds a private key                        | Runtime holds only a revocable `kh_` key; `PRIVATE_KEY` is grep-guarded to `packages/contracts/script`                                                                                                                                                                                                                                                                                                                                                                                                                                                        | `.github/workflows/ci.yml`                                                                                                                                                                                                                                                    | CVY-000           | ENFORCED |
-| No failure is ever staged                               | CI grep-guard bans staged-failure patterns in non-test code; invalid items point at a contract that genuinely reverts                                                                                                                                                                                                                                                                                                                                                                                                                                         | `.github/workflows/ci.yml` · `packages/contracts/src/MockRewardDistributor.sol` (`test_preconditionChain_isGenuine`)                                                                                                                                                          | CVY-000 / CVY-001 | ENFORCED |
-| Ordering commitments are tamper-evident onchain         | `ConvoyRegistry` storage — `state`, `committedCount`, `payloadHash[runId][idx]` — is one-shot per index and operator-bound, proven by handler-based invariants at `runs=1000 depth=32`                                                                                                                                                                                                                                                                                                                                                                        | `packages/contracts/test/ConvoyRegistry.invariant.t.sol`                                                                                                                                                                                                                      | CVY-001           | ENFORCED |
-| The onchain payload commitment means what Convoy says   | `payloadHash` is byte-identical in Solidity and TypeScript, asserted against 13 fixtures dumped from real Solidity output — not hand-written                                                                                                                                                                                                                                                                                                                                                                                                                  | `tests/fixtures/payloadHash.fixtures.json` · `packages/kh-client/test/payloadHash.parity.test.ts`                                                                                                                                                                             | CVY-002           | ENFORCED |
-| Retries are genuine                                     | Onchain retries come from KeeperHub's transient handling and are only observed and recorded                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | [`CVY-015 live proof`](docs/milestones/CVY-015.md)                                                                                                                                                                                                                            | CVY-015           | ENFORCED |
-| The budget meter is not fabricated                      | **Two figures, never conflated (DEC-010).** _Gas consumed_ = `gasUsed × effectiveGasPrice + l1Fee`, composed from the chain receipt — always recorded, and what drains the budget. _Wallet debited_ = the same figure only where the execution record says `sponsored:false`, and zero where the paymaster paid. KeeperHub's ERC-4337 paymaster covers ~$1/month on a free account and then stops, so the two numbers are both real and they differ. **USD is notional** at a frozen price on a testnet (G-04, G-18). Payment leg unused until CVY-017 (G-17) | `services/worker/src/budget.ts` · `services/worker/test/budget.payerSplit.test.ts` · `services/worker/scripts/gasfield.mjs`                                                                                                                                                   | CVY-007 / CVY-010 | ENFORCED |
-| The manifest reconciles independent sources             | KeeperHub status ↔ ConvoyRegistry events read from chain ↔ Convoy ledger                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | [`CVY-012 report`](docs/milestones/CVY-012.md)                                                                                                                                                                                                                                | CVY-012           | ENFORCED |
-| The AI is load-bearing                                  | Three fresh Base Sepolia runs are now measured. Removing Planner extraction reduced the batch to one submitted/landed item; removing the Critic admitted two invalid submissions, both rejected by KeeperHub before target broadcast, and produced an 8/10 landed result. No target-level revert or wasted-gas claim is made for those two calls. The Planner's separate eval remains **29/29 first-pass valid JSON**, dependency recall **53/56 = 0.946**, precision 0.981, **zero cycles**, 1/104 trap edges emitted                                        | [`CVY-016 report`](docs/milestones/CVY-016.md) · [`baseline`](docs/milestones/CVY-016-live-baseline.json) · [`planner ablation`](docs/milestones/CVY-016-live-planner.json) · [`critic ablation`](docs/milestones/CVY-016-live-critic.json) · [`Planner eval`](#planner-eval) | CVY-010 / CVY-016 | MEASURED |
+1. The **Planner** converts the requested actions and evidence into an ordered plan with explicit
+   dependencies and deferrals.
+2. Before execution, Convoy obtains real simulation facts and asks the separately prompted
+   **Critic** whether each action is justified by its evidence. Deterministic whitelist, dependency,
+   budget, and simulation checks remain authoritative.
+3. Approved actions are committed and submitted through **KeeperHub**. Convoy observes execution
+   status and KeeperHub-managed onchain retries; it does not implement a relayer.
+4. The worker records attempts, events, transaction hashes, receipt-derived gas, and registry
+   evidence in the PostgreSQL ledger.
+5. The manifest reconciles KeeperHub status, Base Sepolia `ConvoyRegistry` events, and the Convoy
+   ledger into one exportable proof.
 
-## Verified onchain artifacts
+### GenLayer's role
 
-| Artifact                           | Network            | Address / hash                                                       | Explorer                                                                                                   | Verified    |
-| ---------------------------------- | ------------------ | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ----------- |
-| ConvoyRegistry                     | Base Sepolia 84532 | `0xec51F84BD04dB4515Aa654a4a4f57Ce7596850dA`                         | [view](https://sepolia.basescan.org/address/0xec51F84BD04dB4515Aa654a4a4f57Ce7596850dA#code)               | ✅ verified |
-| MockRewardDistributor (demo only)  | Base Sepolia 84532 | `0xD45c61797d7283caf8A31D91A5Bd6465A45AD561`                         | [view](https://sepolia.basescan.org/address/0xD45c61797d7283caf8A31D91A5Bd6465A45AD561#code)               | ✅ verified |
-| Submission transaction (`openRun`) | Base Sepolia 84532 | `0x1ffb4aaf9525fd68b5d8eabe96d1e99058bbc40f9b0d7f7db102aa0d81b2bbcd` | [view](https://sepolia.basescan.org/tx/0x1ffb4aaf9525fd68b5d8eabe96d1e99058bbc40f9b0d7f7db102aa0d81b2bbcd) | —           |
+Planner and Critic inference run through a deployed stateless Intelligent Contract on **GenLayer
+Bradbury**. Convoy's runtime creates an accountless client and calls only
+`simulateWriteContract`. It does not use `writeContract`, hold a GenLayer private key, submit a GEN
+transaction, or poll GenLayer finality. A deployment account was needed to deploy the Intelligent
+Contract once; it is not part of runtime inference.
 
-## Historical dispatch-width measurement
+### KeeperHub's role
 
-Convoy's current production default is `EXECUTE_FANOUT=1`. Wider fanout is an explicit
-measurement/rehearsal override because G-40 recorded real `InvalidNonce()` failures at fanout 4.
-The results below are historical throughput measurements, not current stability evidence.
+KeeperHub remains the only Base-chain write rail. Writes execute through KeeperHub's organization
+wallet, while Convoy supplies no local signature and never sets or manages a nonce. KeeperHub
+execution IDs, statuses, transaction hashes, retry observations, and receipt evidence are
+reconciled back into Convoy's ledger and proof manifest.
 
-The same 12-item batch was run twice on 2026-08-04 (DEC-007):
+`MockRewardDistributor` is a demo-only release target. The accepted runs use real KeeperHub calls,
+Base Sepolia transactions, receipts, and ledger records; Convoy does not stage failures or invent
+transaction hashes.
 
-| Dispatch width | Elapsed    | Landed  |
-| -------------- | ---------- | ------- |
-| 4              | **75.5 s** | 12 / 12 |
-| 12             | **77.8 s** | 12 / 12 |
+## Run Board
 
-Tripling the width changed nothing, and the wider run was marginally slower. Reading every receipt
-(DEC-006): nonces strictly increasing — 2485–2488, 2493–2496, 2501–2503 — one transaction per
-successive ~2 s block, never batched. **Throughput is bounded by the sequential nonce, not by
-Convoy's dispatch.**
+The production Run Board is the operational surface for inspecting a release. It presents:
 
-The sender is a KeeperHub relay EOA, not the org Turnkey wallet, and this repository does not claim
-otherwise (DEC-009, gap G-30).
+- run status, budget, and action tally;
+- the append-only execution timeline;
+- a dependency DAG with action states and deferrals;
+- the reconciled proof manifest;
+- an audit/evidence drawer with Planner rationale, Critic and simulation facts, attempts, hashes,
+  and registry evidence; and
+- real SSE updates with event replay, so live state survives refreshes.
 
-## Planner eval
+Production: [https://convoy-five.vercel.app](https://convoy-five.vercel.app)
 
-Measured against `tests/fixtures/planner.10run.json` — 10 runs, 48 items, 20 labelled dependency
-edges — using `openai/gpt-oss-20b:free`. **The fixture was committed before the Planner was ever run
-against a model** (`5a09ccc`, ahead of the eval harness), so it cannot have been tuned to the answers.
+Known real Run Board:
+[https://convoy-five.vercel.app/runs/0d4bd5aa-1780-4ff0-ad35-fc8cdc236e4f](https://convoy-five.vercel.app/runs/0d4bd5aa-1780-4ff0-ad35-fc8cdc236e4f)
 
-| Metric                               | Result            | Acceptance |
-| ------------------------------------ | ----------------- | ---------- |
-| First-pass valid JSON                | **29/29 = 100%**  | ≥ 95%      |
-| Dependency recall                    | **53/56 = 0.946** | ≥ 0.9      |
-| Cycles emitted                       | **0**             | 0          |
-| Precision                            | 0.981             | —          |
-| Trap edges emitted                   | 1 / 104           | —          |
-| Plans respecting every labelled edge | **29/29**         | —          |
+The direct Run Board URL is the operational demo surface. It renders the accepted baseline run from
+the shared ledger; the root URL is intentionally only a minimal entry surface.
 
-**All three misses were the same kind of miss**, and it does not change what executes. Where the
-evidence implies `2 after 1 after 0`, the model records those two edges and omits the redundant
-`2 after 0` — one rationale says "and implicitly after price feed", so it read the constraint and
-declined to write it twice. The transitive closure differs; the execution order does not, which is
-why the last row is 29/29 and not 26/29.
+## CVY-016 evidence
 
-Both numbers come from **one** set of 30 live completions (D-032), all committed under
-`tests/fixtures/planner.transcripts/`. CI replays that recording; it does not re-measure, and says so
-in its own output.
+CVY-016 measured the same 11-action fixture in three fresh Base Sepolia runs. Each run used a fresh
+`MockRewardDistributor`, the same production worker lifecycle, and KeeperHub for every Base write.
 
-## Ablation results
+### Provenance
 
-Measured from the immutable live artifacts and the PostgreSQL ledger on Base Sepolia (84532). The
-11-item fixture is the denominator for the batch description; `landed-item rate` is the harness
-metric and uses submitted EXECUTE items as its denominator.
+| Mode             | Ledger run ID                          | Plan                                                                      | Critic and gate                             |
+| ---------------- | -------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------- |
+| Baseline         | `0d4bd5aa-1780-4ff0-ad35-fc8cdc236e4f` | `source=planner`                                                          | `criticConsulted=true`; normal gate         |
+| Planner ablation | `72e9b3d9-5e8e-49b1-b9a4-49684cfd15a3` | `source=ablation-planner`; input order with dependency extraction removed | Genuine Critic remained active; normal gate |
+| Critic ablation  | `f7243450-9aaa-49cf-97c3-fa0431dc7144` | `source=planner`; inherited accepted baseline plan                        | `criticConsulted=false`; `gate=bypassed`    |
 
-| Configuration      | Submitted → landed (rate) | Failed / invalid | KeeperHub pre-broadcast rejections | Target-level onchain reverts | Wasted-gas events | Budget spent (delta vs baseline) | Starved dependents | Evidence                                                          |
-| ------------------ | ------------------------- | ---------------- | ---------------------------------- | ---------------------------- | ----------------- | -------------------------------- | ------------------ | ----------------------------------------------------------------- |
-| Full system        | 8 → 8 (100%)              | 0 / 0            | 0                                  | 0                            | 0                 | `0.030967 USDC`                  | 1                  | [`baseline artifact`](docs/milestones/CVY-016-live-baseline.json) |
-| `--ablate-planner` | 1 → 1 (100%)              | 0 / 0            | 0                                  | 0                            | 0                 | `0.006555 USDC` (`-0.024412`)    | 0                  | [`Planner artifact`](docs/milestones/CVY-016-live-planner.json)   |
-| `--ablate-critic`  | 10 → 8 (80%)              | 2 / 2            | 2                                  | 0                            | 0                 | `0.035589 USDC` (`+0.004622`)    | 1                  | [`Critic artifact`](docs/milestones/CVY-016-live-critic.json)     |
+### Measured results
 
-The Planner-ablation rate is 100% only because one item reached EXECUTE; ten of the eleven fixture
-items were stopped by the preserved simulation/Critic gate after dependency extraction was removed.
-In Critic ablation, exactly ten items were submitted: eight landed and two invalid submissions were
-rejected by KeeperHub before a target transaction was broadcast. Those two calls have no target
-transaction hash or receipt gas, so they are not described as onchain reverts or wasted gas.
+| Mode             | Landed | Submitted | Failed/reverted¹ | Invalid submissions | Wasted-gas events | Wasted gas |          Budget | Delta vs baseline | Starved dependents |
+| ---------------- | -----: | --------: | ---------------: | ------------------: | ----------------: | ---------: | --------------: | ----------------: | -----------------: |
+| Baseline         |      8 |         8 |                0 |                   0 |                 0 |   `0 USDC` | `0.030967 USDC` |                 — |                  1 |
+| Planner ablation |      1 |         1 |                0 |                   0 |                 0 |   `0 USDC` | `0.006555 USDC` |  `-0.024412 USDC` |                  0 |
+| Critic ablation  |      8 |        10 |                2 |                   2 |                 0 |   `0 USDC` | `0.035589 USDC` |  `+0.004622 USDC` |                  1 |
 
-### Accepted live run identities
+¹ The harness's `failed/reverted` metric counts failed target execution attempts. In the
+Critic-ablation run, KeeperHub rejected both invalid target actions during pre-broadcast
+processing. Neither action produced a target transaction hash or receipt, so the measured result is
+**zero target-level onchain reverts and zero wasted-gas events**. This is the observed behavior of
+the execution rail, not a claim that target gas was spent.
 
-The JSON artifacts are canonical for every item-level commit/target hash. The ledger-backed open and
-seal transactions are recorded here for quick verification:
+The Planner-ablation run landed every action it submitted, but only one of the 11 fixture actions
+reached submission because the normal simulation/Critic gate remained active after dependency
+extraction was removed. Its 1/1 submitted-item rate is therefore not equivalent to the baseline's
+8/8 result.
 
-| Mode             | Ledger run ID                          | Onchain run ID                                                       | Fresh distributor                            | Open transaction                                                                                                          | Seal transaction                                                                                                          |
-| ---------------- | -------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Baseline         | `0d4bd5aa-1780-4ff0-ad35-fc8cdc236e4f` | `0x6b955b975daf601c80b3f73062ea71eecc337a29a525c7b8d63a16979cb8f32f` | `0xCD3c0F6E5Eb8945C0A95bd8afED1b868CD57f567` | [`0x21d13b1c…def52f`](https://sepolia.basescan.org/tx/0x21d13b1c491b1cb49dde650dd6aac51ea7a6a8bdc62635fd41e22a1c00def52f) | [`0xdb7ac7b7…36a58c`](https://sepolia.basescan.org/tx/0xdb7ac7b79d921c66cde96aa3fdf283d7139c814d4c9ed7c266eb74e13636a58c) |
-| Planner ablation | `72e9b3d9-5e8e-49b1-b9a4-49684cfd15a3` | `0xbf5cc4be168c02a48235cb6fc4c4b00bf6a70b55a3b87257500f94e54f70b411` | `0x5c52283f4A56d17009741abbb85b1BB74D49E108` | [`0x953e475c…a66abc`](https://sepolia.basescan.org/tx/0x953e475c9a5b748700d0e3ea0b089a045cabea92d48ed3c8e7f22ace37a66abc) | [`0x6f08c50c…60372`](https://sepolia.basescan.org/tx/0x6f08c50cf93a6da8e64d5e52725c20a8dd8c6aa5079f3dad045b8f75d4d60372)  |
-| Critic ablation  | `f7243450-9aaa-49cf-97c3-fa0431dc7144` | `0xe2be0560a5373d2b2f2e8092e8aab0f3cd1720e7c265676cc2c552dff042518e` | `0x350e9ac23E1f35f042EFa11AFfbC7fbCA005Af1B` | [`0x6ce258c2…713c74`](https://sepolia.basescan.org/tx/0x6ce258c2f15aea24c22b13d6bfedb6288eb2e47a8389ee637a9251cc72713c74) | [`0x701404d8…68b66`](https://sepolia.basescan.org/tx/0x701404d88daa13f438a6af396827774b2c7082dbd0de0e325a60ad8309868b66)  |
+### Immutable artifacts
 
-The baseline and Planner-ablation runs are `SEALED_OK`; the Critic-ablation run is `SEALED_PARTIAL`
-because its two invalid target attempts failed without hashes. All three onchain registry records are
-sealed, and every recorded transaction hash in the artifacts has a successful Base Sepolia receipt.
+- [Accepted baseline plan](docs/milestones/CVY-016-live-plan.json)
+- [Baseline run](docs/milestones/CVY-016-live-baseline.json)
+- [Planner-ablation run](docs/milestones/CVY-016-live-planner.json)
+- [Critic-ablation run](docs/milestones/CVY-016-live-critic.json)
 
-## KeeperHub surfaces used
+The [CVY-016 report](docs/milestones/CVY-016.md) records the run identities, fresh target
+contracts, boundary transactions, and acceptance decision. The JSON files are immutable,
+byte-for-byte evidence recordings.
 
-| Surface                                          | Auth              | Used for                                                                                                 |
-| ------------------------------------------------ | ----------------- | -------------------------------------------------------------------------------------------------------- |
-| **REST direct execution** (`packages/kh-client`) | `kh_` Bearer      | **All execution.** Every simulate, write and status poll                                                 |
-| **MCP** — KeeperHub Claude Code plugin v4.0.0    | Browser OAuth 2.1 | Installed and authenticated; used to inspect the org wallet integration and confirm the execution wallet |
+## Why GenLayer
 
-Both reach `app.keeperhub.com/mcp`; only the credential differs. The plugin is a development and
-evaluation surface — **not a runtime dependency**. The worker and client run unattended with no
-browser to complete a sign-in, so they stay on Bearer auth. Uninstalling the plugin leaves Convoy's
-execution path completely unaffected, which is the test of that boundary.
-Detail: [`.convoy/mcp/README.md`](.convoy/mcp/README.md).
+GenLayer provides the inference boundary for Planner/Critic through an Intelligent Contract and
+accountless `simulateWriteContract` calls, while Convoy preserves its existing validation and
+execution pipeline.
 
-## What is a demo stand-in
-
-`MockRewardDistributor` is a **demo-only** contract standing in for a real Merkle-drop distributor.
-It is the honest source of genuine reverts: invalid batch items are pointed at a contract that
-legitimately rejects them (e.g. `fund` before `setRoot`). Convoy does not stage failures.
+That boundary keeps inference separate from Base execution: GenLayer supplies structured Planner
+and Critic responses, while Convoy continues to own schema validation, repair, deterministic
+corroboration, dependency handling, fallback disclosure, ledger persistence, and KeeperHub
+execution. The integration does not depend on a runtime signer or change Convoy's rule that every
+Base write goes through KeeperHub.
 
 ## Architecture
 
-One Next.js app (UI + API routes), one Postgres, one Redis-backed BullMQ worker, one deployed
-contract. No microservices. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — frozen.
-
+```text
+apps/web  Next.js Run Board + API/SSE (Vercel)
+    │ create/read runs, stream append-only events
+    ├───────────────────────┐
+    ▼                       ▼
+Redis / BullMQ        packages/db (Prisma) ── PostgreSQL ledger
+    │                       ▲                         │
+    ▼                       │ attempts/events        │ snapshots/manifests
+services/worker             │                         ▼
+    ├─ packages/ai ─────────┼─ accountless call ── GenLayer Bradbury
+    │  Planner + Critic     │
+    └─ packages/kh-client ──┼─ KeeperHub ── Base Sepolia
+                            │                 ├─ ConvoyRegistry
+                            └─ status/receipts└─ MockRewardDistributor (demo)
 ```
-apps/web            Next.js 14 App Router — UI + API routes (SSE timeline, manifest export)
-services/worker     Node 22 BullMQ worker — orchestrator + state machine (runs off Vercel)
-packages/kh-client  @convoy/kh-client — the ONLY module that touches KeeperHub
-packages/db         @convoy/db — Prisma schema, migrations, seed
-packages/contracts  Foundry — ConvoyRegistry + MockRewardDistributor
-```
 
-## Quickstart
+| Path                 | Responsibility                                                                 |
+| -------------------- | ------------------------------------------------------------------------------ |
+| `apps/web`           | Next.js 14 App Router, Run Board, API routes, SSE stream, manifest export      |
+| `services/worker`    | Always-on BullMQ worker and release state machine                              |
+| `packages/ai`        | Planner, Critic, schemas, provider boundary, and GenLayer Intelligent Contract |
+| `packages/kh-client` | The only runtime package that communicates with KeeperHub                      |
+| `packages/db`        | Prisma client, migrations, and the append-only PostgreSQL ledger               |
+| `packages/contracts` | Foundry project for `ConvoyRegistry` and the demo target                       |
+
+The frozen architecture is documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Production deployment
+
+| Surface              | Production role                                                           |
+| -------------------- | ------------------------------------------------------------------------- |
+| Vercel               | Next.js frontend, server-rendered Run Board, API routes, and SSE endpoint |
+| Shared PostgreSQL    | Ledger for runs, items, attempts, events, and manifests                   |
+| Shared Redis         | BullMQ queue and coordination state                                       |
+| Always-on worker     | Long-lived orchestration process hosted outside Vercel                    |
+| GenLayer Bradbury    | Accountless Planner/Critic inference                                      |
+| KeeperHub            | Organization-wallet simulation and the only Base write rail               |
+| Base Sepolia (84532) | Primary execution chain and receipt/registry evidence source              |
+
+The checked-in [deployment guide](docs/DEPLOYMENT.md) confirms that PostgreSQL and Redis are shared
+with an always-on worker outside Vercel. It lists Railway or Fly as supported worker hosts but does
+not identify the production datastore vendor, so this README makes no vendor-specific hosting
+claim. Runtime configuration is supplied through environment variables; no credentials or secret
+values belong in the repository.
+
+## Verification
+
+The completed implementation has the following recorded verification:
+
+| Area                 | Verified result                                                                                                                             |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Web tests            | 108 passing                                                                                                                                 |
+| AI tests             | 24 passing                                                                                                                                  |
+| Worker tests         | 137 passing with PostgreSQL and Redis available                                                                                             |
+| Static checks        | Workspace and script typechecks, lint, and production build passed                                                                          |
+| Browser checks       | Run Board Playwright coverage, including DAG/timeline rendering and refresh/replay                                                          |
+| Safety checks        | Contract invariants plus prohibited-value guards for direct KeeperHub access, nonce assignment, private-key references, and staged failures |
+| Production smoke     | Public root and real Run Board returned HTTP 200; real ledger data rendered without Prisma, Server Component, or browser-console errors     |
+| Production live path | The real run's SSE endpoint returned HTTP 200 and delivered the ledger-backed stream rather than a 500 response                             |
+
+See [docs/TESTING.md](docs/TESTING.md) for the test catalog and commands.
+
+Repository-wide Prettier intentionally excludes the four
+`docs/milestones/CVY-016-live-*.json` recordings. They are preserved byte-for-byte instead of being
+normalized, so `pnpm format:check` cannot attest Prettier conformance for those immutable files; it
+checks the repository's non-ignored files. README formatting is validated independently with
+`pnpm exec prettier --check README.md`.
+
+## Running locally
+
+Convoy requires Node 22, pnpm, PostgreSQL, and Redis. The repository's supported setup sequence is:
 
 ```bash
-nvm use                 # Node 22
+nvm use
 corepack enable
-./scripts/bootstrap.sh  # installs, builds, tests, verifies the environment
-pnpm tsx scripts/verify-env.ts   # PASS/FAIL matrix
+cp .env.example .env
+pnpm install
+pnpm --filter @convoy/db db:generate
+pnpm --filter @convoy/db db:migrate
+pnpm --filter @convoy/db db:seed
+pnpm tsx scripts/verify-env.ts
 ```
 
-Requires local Postgres and Redis. Copy `.env.example` to `.env` and fill it in — never commit it.
+Fill the local `.env` before running verification. Never commit it. The complete automated setup is
+also available as `./scripts/bootstrap.sh`.
+
+### Web development
+
+```bash
+pnpm --filter @convoy/web dev
+pnpm --filter @convoy/web test
+pnpm --filter @convoy/web exec playwright test
+```
+
+The Playwright suite needs its documented run/database environment; unit tests do not require a
+browser-facing production deployment.
+
+### AI and preflight
+
+```bash
+pnpm --filter @convoy/ai test
+pnpm --filter @convoy/ai preflight:genlayer
+pnpm run eval:planner:replay
+pnpm run eval:critic:replay
+```
+
+The GenLayer preflight uses the configured deployed contract but performs no database, KeeperHub,
+Base-chain, or GenLayer write.
+
+### Worker and backend
+
+```bash
+pnpm --filter @convoy/worker dev
+pnpm --filter @convoy/worker test
+pnpm --filter @convoy/db test
+```
+
+Worker and database tests require reachable PostgreSQL and Redis services. The development worker
+uses the same queue lifecycle as production.
+
+### CVY-016 evidence
+
+Do not rerun the live experiment after the project freeze. The harness can recompute the published
+metrics offline from the immutable artifacts without `--execute`:
+
+```bash
+pnpm tsx scripts/ablation.ts \
+  --plan-input docs/milestones/CVY-016-live-plan.json \
+  --snapshot docs/milestones/CVY-016-live-baseline.json
+
+pnpm tsx scripts/ablation.ts --ablate-planner \
+  --snapshot docs/milestones/CVY-016-live-planner.json \
+  --baseline-snapshot docs/milestones/CVY-016-live-baseline.json
+
+pnpm tsx scripts/ablation.ts --ablate-critic \
+  --plan-input docs/milestones/CVY-016-live-plan.json \
+  --snapshot docs/milestones/CVY-016-live-critic.json \
+  --baseline-snapshot docs/milestones/CVY-016-live-baseline.json
+```
+
+These commands are read-only evidence replays. Live execution additionally requires an explicit
+guard and is outside the frozen project scope.
+
+## Project status
+
+- The core Planner → Critic → KeeperHub → Base Sepolia → proof implementation is complete.
+- CVY-016 live evidence is complete with the documented Critic-ablation pre-broadcast limitation.
+- The production Run Board and its SSE-backed real-run view are operational.
+- This README was finalized after the hackathon deadline. It makes no claim about award or
+  submission outcome and does not mark unverified milestones complete.
+- The repository is frozen at the completed scope. Any future work is outside this release rather
+  than required to operate the current architecture.
+
+## What we deliberately did not build
+
+- `ScreenHome`, `ScreenRuns`, and `ScreenNewRun` design concepts were not integrated into the
+  production application.
+- A full marketing homepage, run-history screen, and plain-language new-run creation UI were
+  excluded. The current `POST /api/runs` path validates and enqueues an existing ledger run; it is
+  not a general creation surface.
+- Optional milestone work such as a human approval gate, the x402 payment leg, Telegram
+  notifications, and a Base-mainnet flip remains outside the frozen core.
+- Unrelated optional deadline, submission, and presentation work is not represented as completed
+  product functionality.
+
+These surfaces were intentionally excluded from the final scope; they are not hidden dependencies
+of the Run Board or execution pipeline.
+
+## Known limitations
+
+- Root `/` is a minimal entry surface rather than a full marketing homepage.
+- The direct `/runs/<real-run-id>` route is the strongest operational demo surface.
+- There is no browser new-run creation workflow; the queue entrypoint operates on an existing
+  ledger run ([G-43](docs/KNOWN_GAPS.md)).
+- Execution is on Base Sepolia. Receipt gas units are real, while the displayed gas budget in USDC
+  is notional at the run's frozen ETH/USD price; no x402 payment leg is included.
+- KeeperHub serializes writes through a sequential nonce path. Production defaults to execution
+  fanout 1 after wider fanout produced real nonce failures; increasing local concurrency is not a
+  throughput guarantee.
+- In the Critic ablation, KeeperHub's pre-broadcast rejection behavior prevented target-level
+  revert and wasted-gas measurements, exactly as documented in the evidence section.
+
+The maintained gap register is [docs/KNOWN_GAPS.md](docs/KNOWN_GAPS.md).
 
 ## Documentation
 
-| Doc                                                                      | Purpose                                 |
-| ------------------------------------------------------------------------ | --------------------------------------- |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)                           | Frozen protocol source of truth         |
-| [`docs/IMPLEMENTATION_BLUEPRINT.md`](docs/IMPLEMENTATION_BLUEPRINT.md)   | Frozen implementation source of truth   |
-| [`docs/PRODUCT_DISCOVERY.md`](docs/PRODUCT_DISCOVERY.md)                 | Frozen product source of truth          |
-| [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md)         | Live milestone dashboard                |
-| [`docs/WORKLOG.md`](docs/WORKLOG.md)                                     | Append-only build diary                 |
-| [`docs/KNOWN_GAPS.md`](docs/KNOWN_GAPS.md)                               | Gaps, drift, and documented fallbacks   |
-| [`docs/TESTING.md`](docs/TESTING.md)                                     | Test catalog and commands               |
-| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)                               | Deploy and rollback                     |
-| [`docs/RUNBOOK_FIRST_TRANSACTION.md`](docs/RUNBOOK_FIRST_TRANSACTION.md) | **Authority** for deploy + first tx     |
-| [`.convoy/mcp/README.md`](.convoy/mcp/README.md)                         | KeeperHub MCP surfaces and auth paths   |
-| [`docs/AI_WORKFLOW.md`](docs/AI_WORKFLOW.md)                             | Milestone lifecycle and operating rules |
-| [`docs/DECISIONS.md`](docs/DECISIONS.md)                                 | Numbered decision log                   |
+- [Architecture](docs/ARCHITECTURE.md)
+- [Deployment](docs/DEPLOYMENT.md)
+- [Testing](docs/TESTING.md)
+- [Implementation status](docs/IMPLEMENTATION_STATUS.md)
+- [Decision log](docs/DECISIONS.md)
+- [Worklog](docs/WORKLOG.md)
+- [Project workflow](docs/AI_WORKFLOW.md)
 
-## License
+## License and contribution
 
-MIT
+The repository's existing license declaration is **MIT**. No standalone `LICENSE` or formal
+`CONTRIBUTING` file is present. The project workflow is documented in
+[docs/AI_WORKFLOW.md](docs/AI_WORKFLOW.md); changes beyond the frozen release belong to explicitly
+scoped future work.
